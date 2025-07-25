@@ -27,6 +27,7 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25);
 float BottomPress = 1013.25;
+double ThresholdPress = 1010;
 
 //モタドラ設定
 #define R_Ain1 0
@@ -42,13 +43,24 @@ const uint8_t Motor_Speed_Max = 255;
 MotorRegulation Motors(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
 
 /*タイマー設定*/
+unsigned long previous_Millis = 0; //delay書き換え用に使ってます
 unsigned long previous_bomb_Millis = 0;
 unsigned long bombtime_1 = 40000; /*後で変える*/
 unsigned long previous_bomb_Millis_2 = 0;
 unsigned long bombtime_2 = 30000; /*後で変える bombtime_2 must be less than bombtime_1*/
 unsigned long previous_SD_Millis = 0;
 unsigned long current_SD_Millis = 0;
-uint16_t count_SD = 0;
+
+//SDで記録するグローバル変数
+uint16_t mission_time_SD = 1;
+double LatMe_deg = 0.0;
+double LongMe_deg = 0.0;
+float pressure = 0.0;
+//float camera = 0.0;
+double distance = 0.0;//phase3のみで記録
+double angle = 0.0;//phase3のみで記録
+char state[10];//タイヤの運動
+char data[200]; //SDに書き込む内容
 
 int8_t phase = 0;
 
@@ -86,6 +98,15 @@ void setup() {
   Serial.println("BME280 初期化成功");
   }
 
+  /*以下sam-m10q*/
+  while (myGNSS.begin() == false) //Connect to the u-blox module using Wire port
+  {
+    Serial.println(F("u-blox GNSS not detected at default I2C address. Retrying..."));
+    delay(1000);
+  }
+
+  myGNSS.setI2COutput(COM_TYPE_UBX);
+
   /*並列処理用タスク設定*/
   xTaskCreatePinnedToCore(
     ParallelTask,   // タスク関数へのポインタ(スレッドで実行させたい関数を設定)
@@ -97,22 +118,8 @@ void setup() {
     0              // 利用するCPUコア(0か1を指定できるがXIAO ESP32C3は1つのCPUしかないので0となる)
   );
 
-  /*以下sam-m10q*/
-  while (myGNSS.begin() == false) //Connect to the u-blox module using Wire port
-  {
-    Serial.println(F("u-blox GNSS not detected at default I2C address. Retrying..."));
-    //delay(1000);
-    unsigned long previousMills = millis();
-    unsigned long currentMills = millis();
-    while(currentMills - previousMills < 1000){
-      currentMills = millis();
-    }
-  }
-
-  myGNSS.setI2COutput(COM_TYPE_UBX);
-
-  double LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
-  double LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
+  LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
+  LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
 
   Factors_Distance = new CalculateDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
   Factors_Angle = new CalculateAngle(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
@@ -125,22 +132,32 @@ void setup() {
   pinMode(R_Ain2, OUTPUT);
   pinMode(L_Ain1, OUTPUT);
   pinMode(L_Ain2, OUTPUT);
+
+  #ifdef REASSIGN_PINS
+    SPI.begin(sck, miso, mosi, cs);
+    if (!SD.begin(cs)) {
+  #else
+    if (!SD.begin()) {
+  #endif
+    Serial.println("！SDカードのマウントに失敗しました");
+    return; 
+  }
+
+  uint8_t cardType = SD.cardType();
+  
+  if (cardType == CARD_NONE) {
+    Serial.println("！SDカードがありません");
+    return;
+  }
+
+  writeFile(SD, "/b.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
 }
 
 
 //-------------------------------------------------------------------------------------------
 void loop() {
-  double LatMe_deg = 0.0;
-  double LongMe_deg = 0.0;
-  double distance = 0.0;
-  double angle = 0.0;
 
-
-  int Rotate_Time = 0;
-  if (myGNSS.getPVT() == true) {
-    LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
-    LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
-  }
+  int Rotate_Time = 0;//モータを回転させる時間
 
 
   /*
@@ -158,7 +175,7 @@ void loop() {
     /*スイッチON→頂点検知*/
     //AveVarianceは後から数値を変更!要確認!
     //ThresholdPress,ListNumも後から数値を変更!要確認!
-    if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, ListNum) == 0) {
+    if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, 10) == 0) {
       phase = 1;
     } else {
     }
@@ -168,7 +185,7 @@ void loop() {
     /* phase is 1 */
     /*頂点検知→第一回衝撃→着地検知*/
     if (IsShocked == 0) {
-      if (FallDetect() == 1) {
+      if (FallDetect(19.6 /*gx2*/, 100, 10, 10) == 1) {
         IsShocked = 1;
       } else {
       }
@@ -182,7 +199,11 @@ void loop() {
     /* 分離 */
     Motors.rotateRight(1, Motor_Speed_Max);//マックススピードで分離をする
     Motors.rotateLeft(1, Motor_Speed_Max);
-    delay(5000);
+    previous_Millis = millis();
+    while(millis() - previous_Millis < 5000){
+      RecordCsv();
+    } 
+    //↑delay(5000);
 
     break;
 
@@ -206,18 +227,30 @@ void loop() {
           //方向修正（モーターライブラリ）
           Rotate_Time = constrain(angle/2.792, 300, angle/2.792);//2.792rad=160度
           Motors.rotateLeft(1, Motor_Speed_Max);
-          delay(Rotate_Time);
+          
+          previous_Millis = millis();
+          while(millis() - previous_Millis < Rotate_Time){
+            RecordCsv();
+          }
+          //↑delay(Rotate_Time);
 
         } else {
           //x進む（モーターライブラリ）
           Motors.rotateRight(1, Motor_Speed_70);
           Motors.rotateLeft(1, Motor_Speed_70);
-          delay(1000);  //約1m進む
-
+          previous_Millis = millis();  //約1m進む
+          while(millis() - previous_Millis < 1000){
+            RecordCsv();
+          }
+          //↑delay(1000)
           //止まる（モーターライブラリ）
           Motors.stopRightmotor();
           Motors.stopLeftmotor();
-          delay(500);
+          previous_Millis = millis();
+          while(millis() - previous_Millis < 500){
+            RecordCsv();
+          }
+          //↑delay(500);
         }
     } else {  //ゴールからの距離10m以上
         if (angle > 1.047) {//60度以上
@@ -229,12 +262,20 @@ void loop() {
           //x進む（モーターライブラリ）
           Motors.rotateRight(1, Motor_Speed_70);
           Motors.rotateLeft(1, Motor_Speed_70);
-          delay(10000);  //約10m進む
+          previous_Millis = millis();
+          while(millis() - previous_Millis < 10000){
+            RecordCsv();
+          }
+          //↑delay(10000);  //約10m進む
 
           //止まる（モーターライブラリ）
           Motors.stopRightmotor();
           Motors.stopLeftmotor();
-          delay(500);
+          previous_Millis = millis();
+          while(millis() - previous_Millis){
+            RecordCsv();
+          }
+          //↑delay(500);
         }
     }
   break;
@@ -252,6 +293,7 @@ void loop() {
 //-------------------------------------------------------------------------------------------
 void ParallelTask(void *param) {
   while(true) {
+    RecordCsv();
     switch (phase)
     {
       case 0:
@@ -278,8 +320,8 @@ void ParallelTask(void *param) {
         } else {
           previous_bomb_Millis_2 = millis();
         }
-        //BottomPress, OverBottomPressNum, ListNumは後から数値を変更!要確認!
-        if (CompareToBottomPress(BottomPress, OverBottomPressNum, ListNum) == 0) {
+        //BottomPress, ListNumは後から数値を変更!要確認!
+        if (CompareToBottomPress(BottomPress, 10) == 0) {
           } else {
             phase = 2;
         }
@@ -338,7 +380,7 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
       OverThresholdCount++;
     }
     
-    delay(addtime);
+    (addtime);
   }
 
   return 1;
@@ -394,7 +436,7 @@ double ComparePress(double ThresholdPress, int8_t ListNum) {
 
 
 /*古い気圧データを捨てられてなくないか？(6/17)*/
-int8_t CompareToBottomPress(float BottomPress, int8_t OverBottomPressNum, int8_t ListNum) {
+int8_t CompareToBottomPress(float BottomPress, int8_t ListNum) {
   float PressList[ListNum] = {};
   float AvePress;
 
@@ -429,7 +471,11 @@ float PressVariance(int Period, int Num) {
   /* Period[ms]間隔でNum[個]の気圧の値をとってリストにする。　*/
   for (int i = 0; i < Num; i++) {
     PressList[i] = GetPress();
-    delay(Period);
+    previous_Millis = millis();
+    while(millis() - previous_Millis < Period){
+      RecordCsv();
+    }
+    //↑delay(Period);
   }
 
   /* P-tグラフにおいて、連続する2つの気圧とPeriodが成す四角形の面積を、気圧がNum[個]、四角形Num-1[個]求めてリストにする。　*/
@@ -451,7 +497,7 @@ float PressVariance(int Period, int Num) {
 float AveVariance(int8_t VarianceNum) {
   float AveAreaVariance;
   for (int8_t i = 0; i < VarianceNum; i++) {
-    AveAreaVariance += PressVariance(400, 10) / VarianceNum;
+    AveAreaVariance += PressVariance(100, 10) / VarianceNum;
     /* τ=400で10個データを取る */
   }
   return AveAreaVariance;
@@ -482,3 +528,40 @@ float GetAzimuth() {
   return yaw;
 }
 
+void RecordCsv(){
+  current_SD_Millis = millis();
+
+  if(current_SD_Millis - previous_SD_Millis > 1000){
+
+    pressure = GetPress();//SD用気圧取得
+    if (myGNSS.getPVT() == true) {  //SD用座標取得
+      LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
+      LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
+    }
+
+    if(phase<3){
+      snprintf(data, sizeof(data),
+      "%d,%d,%lf,%lf,%f,NA,NA,NA,NA\n",
+      mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure);
+
+      appendFile(SD, "/b.csv", data);//要素
+      mission_time_SD += 1;
+      previous_SD_Millis = millis();
+
+    } else{
+      
+      distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+      angle = Factors_Angle->GetFactor_Alpha1();
+
+      snprintf(data, sizeof(data),
+      "%d,%d,%lf,%lf,%f,NA,%lf,%lf,%s\n",
+      mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);
+
+      appendFile(SD, "/b.csv", data);//要素
+      mission_time_SD += 1;
+      previous_SD_Millis = millis();
+
+    }
+
+  }
+}
