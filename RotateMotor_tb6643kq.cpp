@@ -10,10 +10,10 @@ RotateMotor::RotateMotor(uint8_t r_ain1, uint8_t r_ain2, uint8_t l_ain1, uint8_t
     _resolution = resolution;
     _maxDutyCycle = (1 << _resolution) - 1;    //2^(resolution)-1: 最大デューティ比
 
-    ledcAttach(_R_Ain1, _freq, _resolution);
-    ledcAttach(_R_Ain2, _freq, _resolution);
-    ledcAttach(_L_Ain1, _freq, _resolution);
-    ledcAttach(_L_Ain2, _freq, _resolution);
+    ledcAttachChannel(_R_Ain1, _freq, _resolution, 0);
+    ledcAttachChannel(_R_Ain2, _freq, _resolution, 1);
+    ledcAttachChannel(_L_Ain1, _freq, _resolution, 2);
+    ledcAttachChannel(_L_Ain2, _freq, _resolution, 3);
 
 }
 

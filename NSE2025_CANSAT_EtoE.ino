@@ -24,6 +24,9 @@ TaskHandle_t _p_task;
 /*　↓I2Cの設定*/
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
+//GetAccl
+float acc[3];
+
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25);
 float BottomPress = 1013.25;
@@ -70,7 +73,7 @@ double angle = 0.0;//phase3のみで記録
 char state[50] = "brk";//タイヤの運動
 char data[200]; //SDに書き込む内容
 
-int8_t phase = 1;
+int8_t phase = 3;
 
 /**/
 /*　ゴールの緯度経度　*/
@@ -168,6 +171,7 @@ void loop() {
   
   Serial.print("current phase: ");
   Serial.println(phase);
+  Serial.print(acc[0]);
 
   int Rotate_Time = 0;//モータを回転させる時間
 
@@ -209,12 +213,16 @@ void loop() {
   case 2:
     /* phae is 2 */
     /* 分離 */
-    /*drv
-    Motors.rotateRight(1, Motor_Speed_Max);//マックススピードで分離をする
-    Motors.rotateLeft(1, Motor_Speed_Max);
+    /*drv*/
+    /*
+    Motors.rotateRight(1, Max_Duty);//マックススピードで分離をする
+    Motors.rotateLeft(1, Max_Duty);
     */
+    //tb6643kq
+    
     RotateMotor.rotateRight(1, Max_Duty);
     RotateMotor.rotateLeft(1, Max_Duty);
+    
 
     previous_Millis = millis();
     while(millis() - previous_Millis < 5000){
@@ -255,6 +263,8 @@ void loop() {
           //Motors.rotateLeft(1, Motor_Speed_Max);
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
+          Serial.println("右回転中小周り");
+
           strcpy(state, "turn_R");
           
           previous_Millis = millis();
@@ -273,6 +283,8 @@ void loop() {
 
           RotateMotor.rotateRight(1, duty_70);
           RotateMotor.rotateLeft(1, duty_70);
+          Serial.println("前進中小距離");
+
           strcpy(state, "fwd");
 
           previous_Millis = millis();  //約1m進む
@@ -284,6 +296,8 @@ void loop() {
           //止まる（モーターライブラリ）
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(0, duty_70);
+          Serial.println("ブレーキ小距離");
+
           strcpy(state, "brk");
 
         }
@@ -299,6 +313,8 @@ void loop() {
           //Motors.rotateLeft(1, Motor_Speed_Max);
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
+          Serial.println("右回転中大回り");
+
           strcpy(state, "turn_R");
           
           previous_Millis = millis();
@@ -403,14 +419,13 @@ void ParallelTask(void *param) {
 //-------------------------------------------------------------------------------------------
 int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8_t ListNum) {
   float FallList[ListNum] = {};
-  float *accllist;
   float AvgAcc;
   int8_t OverThresholdCount = 0;
 
   //FallListにListNum個の加速度を代入
   for (int i = 0; i < ListNum; i++) {
-    accllist = GetAccl();
-    FallList[i] = sqrtf(powf(accllist[0],2) + powf(accllist[1],2) + powf(accllist[2],2));
+    GetAccl(acc);
+    FallList[i] = sqrtf(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2));
   }
 
   //OverThresholdCountがOverThresholdNumを超える、まで繰り返し。
@@ -421,8 +436,8 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
       FallList[j-1] = FallList[j];
     }
 
-    accllist = GetAccl();
-    FallList[ListNum-1] = sqrt(powf(accllist[0],2) + powf(accllist[1],2) + powf(accllist[2],2));
+    GetAccl(acc);
+    FallList[ListNum-1] = sqrt(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2));
   
     AvgAcc = 0.0;
     for (int k =0; k < ListNum; k++) {
@@ -453,15 +468,13 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
 }
 
 //FallDetectで使う
-float *GetAccl(){
+void GetAccl(float* Acclist){
   sensors_event_t accelerometerData;
   bno.getEvent(&accelerometerData, Adafruit_BNO055::VECTOR_ACCELEROMETER);
-  double x = -1000000, y = -1000000 , z = -1000000;
-  float Acclist[3] = {0,0,0};
+  double x = -1000000, y = -1000000 , z = -1000000;  
   Acclist[0] = accelerometerData.acceleration.x;
   Acclist[1] = accelerometerData.acceleration.y;
   Acclist[2] = accelerometerData.acceleration.z;
-  return Acclist;
 }
 
 //いるか？これ
