@@ -24,32 +24,32 @@ void RotateMotor::rotateRight(int8_t mode, uint16_t duty_cycle) {
     {
     case 0:    //ショートストップ(ブレーキ)
         /* mode is 0 */
-        ledcWrite(_R_Ain1, _maxDutyCycle);
-        ledcWrite(_R_Ain2, _maxDutyCycle);
+        ledcWriteChannel(0, _maxDutyCycle);
+        ledcWriteChannel(1, _maxDutyCycle);
         break;                            
     
     case 1:    //正転
         /* mode is 1 */
-        ledcWrite(_R_Ain1, 0);
-        ledcWrite(_R_Ain2, duty);
+        ledcWriteChannel(0, 0);
+        ledcWriteChannel(1, duty);
         break;
 
     case 2:    //後転
         /* mode is 2 */
-        ledcWrite(_R_Ain1, duty);
-        ledcWrite(_R_Ain2, 0);
+        ledcWriteChannel(0, duty);
+        ledcWriteChannel(1, 0);
         break;
 
     case 3:    //空転
         /* mode is 3 */
-        ledcWrite(_R_Ain1, 0);
-        ledcWrite(_R_Ain2, 0);
+        ledcWriteChannel(0, 0);
+        ledcWriteChannel(1, 0);
         break;
 
     default:    //ショートストップ(ブレーキ)
-    ledcWrite(_R_Ain1, _maxDutyCycle);
-    ledcWrite(_R_Ain2, _maxDutyCycle);
-    break;                       
+        ledcWriteChannel(0, _maxDutyCycle);
+        ledcWriteChannel(1, _maxDutyCycle);
+        break;                       
     }
 }
 
@@ -60,31 +60,31 @@ void RotateMotor::rotateLeft(int8_t mode, uint16_t duty_cycle) {
     {
     case 0:    //ショートストップ(ブレーキ)
         /* mode is 0*/
-        ledcWrite(_L_Ain1, _maxDutyCycle);
-        ledcWrite(_L_Ain2, _maxDutyCycle);
+        ledcWriteChannel(2, _maxDutyCycle);
+        ledcWriteChannel(3, _maxDutyCycle);
         break;                            
     
     case 1:    //正転
         /* mode is 1 */
-        ledcWrite(_L_Ain1, 0);
-        ledcWrite(_L_Ain2, duty);
+        ledcWriteChannel(2, 0);
+        ledcWriteChannel(3, duty);
         break;
         
     case 2:    //後転
         /* mode is 2 */
-        ledcWrite(_L_Ain1, duty);
-        ledcWrite(_L_Ain2, 0);
+        ledcWriteChannel(2, duty);
+        ledcWriteChannel(3, 0);
         break;
 
     case 3:    //空転
         /* mode is 3 */
-        ledcWrite(_L_Ain1, 0);
-        ledcWrite(_L_Ain2, 0);
+        ledcWriteChannel(2, 0);
+        ledcWriteChannel(3, 0);
         break;     
 
     default:    //ショートストップ(ブレーキ)
-        ledcWrite(_L_Ain1, _maxDutyCycle);
-        ledcWrite(_L_Ain2, _maxDutyCycle);
+        ledcWriteChannel(2, _maxDutyCycle);
+        ledcWriteChannel(3, _maxDutyCycle);
         break;                      
     }    
 }
