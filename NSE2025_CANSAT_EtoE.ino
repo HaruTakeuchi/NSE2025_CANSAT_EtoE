@@ -27,7 +27,7 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25);
 float BottomPress = 1013.25;
-double ThresholdPress = 1010;
+double ThresholdPress = 1000;//頂点検知の閾値の気圧　現地で入力
 
 //モタドラ設定
 #define R_Ain1 0
@@ -35,12 +35,20 @@ double ThresholdPress = 1010;
 #define L_Ain1 2
 #define L_Ain2 21
 
+/*drv用
 //モータの出力は70％→100％（255・0.7＝178.5）
 const uint8_t Motor_Speed_70 = 179;
 const uint8_t Motor_Speed_Max = 255;
 
 //MotorRegulaationクラスのインスタンスを作成
 MotorRegulation Motors(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
+*/
+
+//以下tb6643kq用
+int duty_70 = 180;
+int Max_Duty = 255;
+RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2, 50000, 8);
+
 
 /*タイマー設定*/
 unsigned long previous_Millis = 0; //delay書き換え用に使ってます
@@ -53,16 +61,16 @@ unsigned long current_SD_Millis = 0;
 
 //SDで記録するグローバル変数
 uint16_t mission_time_SD = 1;
-double LatMe_deg = 0.0;
-double LongMe_deg = 0.0;
+double LatMe_deg = 33.61020798927673;
+double LongMe_deg = 130.26847097534915;
 float pressure = 0.0;
 //float camera = 0.0;
 double distance = 0.0;//phase3のみで記録
 double angle = 0.0;//phase3のみで記録
-char state[10];//タイヤの運動
+char state[50] = "brk";//タイヤの運動
 char data[200]; //SDに書き込む内容
 
-int8_t phase = 0;
+int8_t phase = 1;
 
 /**/
 /*　ゴールの緯度経度　*/
@@ -84,7 +92,7 @@ void setup() {
   /*以下BNO055*/
   if (!bno.begin())
   {
-    Serial.print("No BNO055 detected ... Check your wiring or I2C Address");
+    Serial.println("No BNO055 detected ... Check your wiring or I2C Address");
     while (1);
   }
 
@@ -94,9 +102,8 @@ void setup() {
   if (!bme.begin(0x76, &Wire)) {
     Serial.println("BME280が見つかりません。接続を確認してください。");
     while (1);
-
+  }  
   Serial.println("BME280 初期化成功");
-  }
 
   /*以下sam-m10q*/
   while (myGNSS.begin() == false) //Connect to the u-blox module using Wire port
@@ -141,7 +148,9 @@ void setup() {
   #endif
     Serial.println("！SDカードのマウントに失敗しました");
     return; 
-  }
+    }else {
+    Serial.println("SDカードのマウントに成功しました");
+    }
 
   uint8_t cardType = SD.cardType();
   
@@ -150,12 +159,15 @@ void setup() {
     return;
   }
 
-  writeFile(SD, "/b.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
+  writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
 }
 
 
 //-------------------------------------------------------------------------------------------
 void loop() {
+  
+  Serial.print("current phase: ");
+  Serial.println(phase);
 
   int Rotate_Time = 0;//モータを回転させる時間
 
@@ -185,7 +197,7 @@ void loop() {
     /* phase is 1 */
     /*頂点検知→第一回衝撃→着地検知*/
     if (IsShocked == 0) {
-      if (FallDetect(19.6 /*gx2*/, 100, 10, 10) == 1) {
+      if (FallDetect(19.6 /*gx2*/, 50, 10, 10) == 1) {
         IsShocked = 1;
       } else {
       }
@@ -197,36 +209,53 @@ void loop() {
   case 2:
     /* phae is 2 */
     /* 分離 */
+    /*drv
     Motors.rotateRight(1, Motor_Speed_Max);//マックススピードで分離をする
     Motors.rotateLeft(1, Motor_Speed_Max);
+    */
+    RotateMotor.rotateRight(1, Max_Duty);
+    RotateMotor.rotateLeft(1, Max_Duty);
+
     previous_Millis = millis();
     while(millis() - previous_Millis < 5000){
       RecordCsv();
     } 
     //↑delay(5000);
 
+    phase = 3;
     break;
 
   case 3:
     /* phase is 3 */
     /* ゴールまで移動 */
     /*7/25メモ
-      片方のタイヤをマックスパワーで動かすとき160度/s(本番ではしたくない)、また測って
+      片方のタイヤをマックスパワーで動かすとき160度/s(本番ではしたくない)、また測ってください
+      →片方前転片方後転でいいんじゃないか？
       回す時間は最低300msくらいじゃないとトルク的にきつい気がする
       十分長い時間でPWM7割:PWM10割=7:8くらいの走行距離差
-      回す時間が短いほど相対的な差は大きくなる
+      回す時間が短いほど相対的な走行距離の差は大きくなる
       PWMMAXで理論値979mm/sの理論値速さ*/
     distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
     angle = Factors_Angle->GetFactor_Alpha1();
     
     if (distance < 2.5 /*|| カメラでゴール検知*/) {
+      //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
       phase = 4;
 
     } else if(distance < 10){ //ゴールからの距離10m以下
         if (angle > 0.174) {//10度以上
-          //方向修正（モーターライブラリ）
-          Rotate_Time = constrain(angle/2.792, 300, angle/2.792);//2.792rad=160度
-          Motors.rotateLeft(1, Motor_Speed_Max);
+          //方向修正
+
+          //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
+          //回す時間は最低でも300ms  これ以上短いとトルクが足りない気がする(要検討)
+          //回る角度は最大でも350度.つまり2187msの回転が最大
+          //↑これ怖すぎ  350度は絶対安定して回せない  代案要検討
+          Rotate_Time = constrain(angle/2.792, 300, 2187);
+
+          //Motors.rotateLeft(1, Motor_Speed_Max);
+          RotateMotor.rotateRight(0, duty_70);
+          RotateMotor.rotateLeft(1, Max_Duty);
+          strcpy(state, "turn_R");
           
           previous_Millis = millis();
           while(millis() - previous_Millis < Rotate_Time){
@@ -236,46 +265,72 @@ void loop() {
 
         } else {
           //x進む（モーターライブラリ）
+
+          /*drv
           Motors.rotateRight(1, Motor_Speed_70);
           Motors.rotateLeft(1, Motor_Speed_70);
+          */
+
+          RotateMotor.rotateRight(1, duty_70);
+          RotateMotor.rotateLeft(1, duty_70);
+          strcpy(state, "fwd");
+
           previous_Millis = millis();  //約1m進む
-          while(millis() - previous_Millis < 1000){
+          while(millis() - previous_Millis < 1200){
             RecordCsv();
           }
-          //↑delay(1000)
+          //↑delay(1200)
+
           //止まる（モーターライブラリ）
-          Motors.stopRightmotor();
-          Motors.stopLeftmotor();
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 500){
-            RecordCsv();
-          }
-          //↑delay(500);
+          RotateMotor.rotateRight(0, duty_70);
+          RotateMotor.rotateLeft(0, duty_70);
+          strcpy(state, "brk");
+
         }
     } else {  //ゴールからの距離10m以上
         if (angle > 1.047) {//60度以上
           //方向修正（モーターライブラリ）
-          Rotate_Time = constrain(angle/2.792, 500, angle/2.792);
-          Motors.rotateLeft(1, Motor_Speed_Max);
-          delay(Rotate_Time);
+
+          //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
+          //回す時間は最低でも500ms  ゴールとの距離がまだ遠いので安定性重視
+          //回る角度は最大でも300度.つまり1875msの回転が最大          
+          Rotate_Time = constrain(angle/2.792, 500, 1875);
+          
+          //Motors.rotateLeft(1, Motor_Speed_Max);
+          RotateMotor.rotateRight(0, duty_70);
+          RotateMotor.rotateLeft(1, Max_Duty);
+          strcpy(state, "turn_R");
+          
+          previous_Millis = millis();
+          while(millis() - previous_Millis < Rotate_Time){
+            RecordCsv();
+          }
+          //↑delay(Rotate_Time);
+
         } else {
           //x進む（モーターライブラリ）
+          /*drv
           Motors.rotateRight(1, Motor_Speed_70);
           Motors.rotateLeft(1, Motor_Speed_70);
+          */
+          RotateMotor.rotateRight(1, duty_70);
+          RotateMotor.rotateLeft(1, duty_70);
+          strcpy(state, "fwd");
+
           previous_Millis = millis();
-          while(millis() - previous_Millis < 10000){
+          while(millis() - previous_Millis < 12000){
             RecordCsv();
           }
-          //↑delay(10000);  //約10m進む
+          //↑delay(12000);  //約10m進む
 
           //止まる（モーターライブラリ）
+          /*
           Motors.stopRightmotor();
           Motors.stopLeftmotor();
-          previous_Millis = millis();
-          while(millis() - previous_Millis){
-            RecordCsv();
-          }
-          //↑delay(500);
+          */
+          RotateMotor.rotateRight(0, duty_70);
+          RotateMotor.rotateLeft(0, duty_70);
+          strcpy(state, "brk");
         }
     }
   break;
@@ -350,37 +405,47 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
   float FallList[ListNum] = {};
   float *accllist;
   float AvgAcc;
-  int8_t OverThresholdCount;
+  int8_t OverThresholdCount = 0;
 
+  //FallListにListNum個の加速度を代入
   for (int i = 0; i < ListNum; i++) {
     accllist = GetAccl();
     FallList[i] = sqrtf(powf(accllist[0],2) + powf(accllist[1],2) + powf(accllist[2],2));
   }
 
+  //OverThresholdCountがOverThresholdNumを超える、まで繰り返し。
   while (OverThresholdCount < OverThresholdNum) {
+    
+    //FallListを一つ前にずらして最後の値を更新
     for (int j = 1; j < ListNum; j++) {
       FallList[j-1] = FallList[j];
     }
 
+    accllist = GetAccl();
     FallList[ListNum-1] = sqrt(powf(accllist[0],2) + powf(accllist[1],2) + powf(accllist[2],2));
   
-
+    AvgAcc = 0.0;
     for (int k =0; k < ListNum; k++) {
-      AvgAcc += FallList[k];
+      AvgAcc += FallList[k]; 
     }
 
     AvgAcc = AvgAcc/ListNum;
 
-    if (AvgAcc < threshold) {
-      if(OverThresholdCount >0 ) {
-        OverThresholdCount -= 1;
+    if (AvgAcc < threshold) {  //平均が閾値より小さい
+      if(OverThresholdCount >0 ) {  //且つOverThresholdCountが0以下じゃない
+        OverThresholdCount -= 1;  //OverThresholdCountを1減らす
       } else {
       }
-    } else {
-      OverThresholdCount++;
+    } else {  //平均が閾値より大きい
+      OverThresholdCount++;  //OverThresholdCountを1増やす
     }
     
-    (addtime);
+    //delay(addtime);
+    previous_Millis = millis();
+    while(millis() - previous_Millis < addtime){
+      RecordCsv();
+    }
+    Serial.println("ただいまFallDetect中");
   }
 
   return 1;
@@ -415,7 +480,7 @@ float *GetMag() {
 double ComparePress(double ThresholdPress, int8_t ListNum) {
   //ListNumは後から数値を変更!要確認!
   double Presslist[ListNum] = {};
-  double AvePress;
+  double AvePress = 0.0;
 
   for (int i = 0; i < ListNum; i++) {
     Presslist[i] = GetPress();
@@ -438,7 +503,7 @@ double ComparePress(double ThresholdPress, int8_t ListNum) {
 /*古い気圧データを捨てられてなくないか？(6/17)*/
 int8_t CompareToBottomPress(float BottomPress, int8_t ListNum) {
   float PressList[ListNum] = {};
-  float AvePress;
+  float AvePress = 0.0;
 
   for (int i = 0; i < ListNum; i++) {
     PressList[i] = GetPress();
@@ -458,13 +523,13 @@ int8_t CompareToBottomPress(float BottomPress, int8_t ListNum) {
 }
 
 float GetPress() {
-  float Press = bme.readPressure();
+  float Press = bme.readPressure() / 100;
   return Press;
 }
 
 float PressVariance(int Period, int Num) {
   float PressList[Num];
-  float Variance;
+  float Variance = 0.0;
   float SquareList[Num - 1];
   float AreaAve = 0.0;
 
@@ -528,15 +593,25 @@ float GetAzimuth() {
   return yaw;
 }
 
+
 void RecordCsv(){
   current_SD_Millis = millis();
 
   if(current_SD_Millis - previous_SD_Millis > 1000){
 
     pressure = GetPress();//SD用気圧取得
+
     if (myGNSS.getPVT() == true) {  //SD用座標取得
       LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
       LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
+
+      Serial.print("lat: ");
+      Serial.println(LatMe_deg);
+      Serial.print("lon: ");
+      Serial.println(LongMe_deg);
+
+    }else {
+      Serial.println("座標の取得に失敗しました");  
     }
 
     if(phase<3){
@@ -544,7 +619,7 @@ void RecordCsv(){
       "%d,%d,%lf,%lf,%f,NA,NA,NA,NA\n",
       mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure);
 
-      appendFile(SD, "/b.csv", data);//要素
+      appendFile(SD, "/EtoE.csv", data);//要素
       mission_time_SD += 1;
       previous_SD_Millis = millis();
 
@@ -557,11 +632,22 @@ void RecordCsv(){
       "%d,%d,%lf,%lf,%f,NA,%lf,%lf,%s\n",
       mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);
 
-      appendFile(SD, "/b.csv", data);//要素
+      appendFile(SD, "/EtoE.csv", data);//要素
       mission_time_SD += 1;
       previous_SD_Millis = millis();
 
     }
-
   }
 }
+
+/*
+対地用
+行数はver.2のメインでの位置に準拠
+1.240行目  OverThresholdCountの初期値0が定義されていなかったので定義した
+2.247行目  247行目のwhile内でaccllistが更新されていないのでaccllist = GetAccl();を追加した
+3.247行目　247行目のwhile内でAvgAccに最初の代入&再代入が行われていないので255行目の繰り返しの前にAvgAcc=0.0;を追加した
+4.305行目　AvePress=0.0で初期化した
+5.328行目　AvePress=0.0で初期化した
+6.354行目　Variance=0.0で初期化した
+
+*/
