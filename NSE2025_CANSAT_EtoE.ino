@@ -30,7 +30,7 @@ float acc[3];
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25);
 float BottomPress = 1013.25;
-double ThresholdPress = 1000;//頂点検知の閾値の気圧　現地で入力
+double ThresholdPress = 999999;//頂点検知の閾値の気圧　現地で入力
 
 //モタドラ設定
 #define R_Ain1 0
@@ -38,19 +38,18 @@ double ThresholdPress = 1000;//頂点検知の閾値の気圧　現地で入力
 #define L_Ain1 2
 #define L_Ain2 21
 
-/*drv用
 //モータの出力は70％→100％（255・0.7＝178.5）
-const uint8_t Motor_Speed_70 = 179;
-const uint8_t Motor_Speed_Max = 255;
+const uint8_t duty_70 = 180;
+const uint8_t Max_Duty = 255;
 
+//drv用
 //MotorRegulaationクラスのインスタンスを作成
 MotorRegulation Motors(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
-*/
 
-//以下tb6643kq用
-int duty_70 = 180;
-int Max_Duty = 255;
+//tb6643kq用
+/*
 RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2, 50000, 8);
+*/
 
 
 /*タイマー設定*/
@@ -137,11 +136,14 @@ void setup() {
 
 
   /*モタドラ*/
+  //tb6643kq用
   //R_Ain1等のpinの設定をしてください
+  /*
   pinMode(R_Ain1, OUTPUT);
   pinMode(R_Ain2, OUTPUT);
   pinMode(L_Ain1, OUTPUT);
   pinMode(L_Ain2, OUTPUT);
+  */
 
   #ifdef REASSIGN_PINS
     SPI.begin(sck, miso, mosi, cs);
@@ -213,22 +215,34 @@ void loop() {
   case 2:
     /* phae is 2 */
     /* 分離 */
+
     /*drv*/
-    /*
+    
     Motors.rotateRight(1, Max_Duty);//マックススピードで分離をする
     Motors.rotateLeft(1, Max_Duty);
-    */
-    //tb6643kq
     
+    //tb6643kq
+    /*
     RotateMotor.rotateRight(1, Max_Duty);
     RotateMotor.rotateLeft(1, Max_Duty);
-    
+    */
+    Serial.println("分離作動開始");
 
     previous_Millis = millis();
     while(millis() - previous_Millis < 5000){
       RecordCsv();
     } 
     //↑delay(5000);
+
+    //tb6643kq用
+    /*
+    RotateMotor.rotateRight(0, duty_70);
+    RotateMotor.rotateLeft(0, duty_70);
+    */
+
+    //drv用
+    Motors.rotateRight(0, duty_70);
+    Motors.rotateLeft(0, duty_70);
 
     phase = 3;
     break;
@@ -260,9 +274,16 @@ void loop() {
           //↑これ怖すぎ  350度は絶対安定して回せない  代案要検討
           Rotate_Time = constrain(angle/2.792, 300, 2187);
 
-          //Motors.rotateLeft(1, Motor_Speed_Max);
+          //drv用
+          Motors.rotateRight(0, duty_70);
+          Motors.rotateLeft(1, Max_Duty);
+
+          //tb6643kq
+          /*
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
+          */
+
           Serial.println("右回転中小周り");
 
           strcpy(state, "turn_R");
@@ -273,34 +294,45 @@ void loop() {
           }
           //↑delay(Rotate_Time);
 
-        } else {
-          //x進む（モーターライブラリ）
-
-          /*drv
-          Motors.rotateRight(1, Motor_Speed_70);
-          Motors.rotateLeft(1, Motor_Speed_70);
-          */
-
-          RotateMotor.rotateRight(1, duty_70);
-          RotateMotor.rotateLeft(1, duty_70);
-          Serial.println("前進中小距離");
-
-          strcpy(state, "fwd");
-
-          previous_Millis = millis();  //約1m進む
-          while(millis() - previous_Millis < 1200){
-            RecordCsv();
-          }
-          //↑delay(1200)
-
-          //止まる（モーターライブラリ）
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(0, duty_70);
-          Serial.println("ブレーキ小距離");
-
-          strcpy(state, "brk");
-
         }
+        //進む
+
+        //drv
+        
+        Motors.rotateRight(1, duty_70);
+        Motors.rotateLeft(1, duty_70);
+
+        //tb6643kq
+        /*
+        RotateMotor.rotateRight(1, duty_70);
+        RotateMotor.rotateLeft(1, duty_70);
+        */
+       
+        Serial.println("前進中小距離");
+
+        strcpy(state, "fwd");
+
+        previous_Millis = millis();  //約1m進む
+        while(millis() - previous_Millis < 1200){
+          RecordCsv();
+        }
+        //↑delay(1200)
+
+        //止まる
+        //drv
+        Motors.rotateRight(0, duty_70);
+        Motors.rotateLeft(0, duty_70);        
+
+        //tb6643kq
+        /*
+        RotateMotor.rotateRight(0, duty_70);
+        RotateMotor.rotateLeft(0, duty_70);
+        */
+
+        Serial.println("ブレーキ小距離");
+
+        strcpy(state, "brk");
+
     } else {  //ゴールからの距離10m以上
         if (angle > 1.047) {//60度以上
           //方向修正（モーターライブラリ）
@@ -310,9 +342,15 @@ void loop() {
           //回る角度は最大でも300度.つまり1875msの回転が最大          
           Rotate_Time = constrain(angle/2.792, 500, 1875);
           
-          //Motors.rotateLeft(1, Motor_Speed_Max);
+          //drv
+          Motors.rotateRight(1, duty_70); 
+          Motors.rotateLeft(1, Max_Duty);
+
+          //tb6643kq
+          /*
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
+          */
           Serial.println("右回転中大回り");
 
           strcpy(state, "turn_R");
@@ -323,31 +361,38 @@ void loop() {
           }
           //↑delay(Rotate_Time);
 
-        } else {
-          //x進む（モーターライブラリ）
-          /*drv
-          Motors.rotateRight(1, Motor_Speed_70);
-          Motors.rotateLeft(1, Motor_Speed_70);
-          */
-          RotateMotor.rotateRight(1, duty_70);
-          RotateMotor.rotateLeft(1, duty_70);
-          strcpy(state, "fwd");
-
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 12000){
-            RecordCsv();
-          }
-          //↑delay(12000);  //約10m進む
-
-          //止まる（モーターライブラリ）
-          /*
-          Motors.stopRightmotor();
-          Motors.stopLeftmotor();
-          */
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(0, duty_70);
-          strcpy(state, "brk");
         }
+        //進む
+        //drv
+        Motors.rotateRight(1, duty_70);
+        Motors.rotateLeft(1, duty_70);
+        
+        //tb6643kq
+        /*
+        RotateMotor.rotateRight(1, duty_70);
+        RotateMotor.rotateLeft(1, duty_70);
+        */
+        strcpy(state, "fwd");
+
+        previous_Millis = millis();
+        while(millis() - previous_Millis < 12000){
+          RecordCsv();
+        }
+        //↑delay(12000);  //約10m進む
+
+        //止まる
+        //drv
+        
+        Motors.rotateRight(0, duty_70);
+        Motors.rotateLeft(0, duty_70);  
+        
+        //tb6643kq
+        /*
+        RotateMotor.rotateRight(0, duty_70);
+        RotateMotor.rotateLeft(0, duty_70);
+        */
+        strcpy(state, "brk");
+        
     }
   break;
 
@@ -608,6 +653,9 @@ float GetAzimuth() {
 
 
 void RecordCsv(){
+  Serial.print("current phase: ");
+  Serial.println(phase);
+
   current_SD_Millis = millis();
 
   if(current_SD_Millis - previous_SD_Millis > 1000){
