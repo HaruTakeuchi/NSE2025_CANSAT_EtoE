@@ -66,8 +66,8 @@ unsigned long current_SD_Millis = 0;
 
 //SDで記録するグローバル変数
 uint16_t mission_time_SD = 1;
-double LatMe_deg = 33.61020798927673;
-double LongMe_deg = 130.26847097534915;
+double LatMe_deg = 0;
+double LongMe_deg = 0;
 float pressure = 0.0;
 //float camera = 0.0;
 double distance = 0.0;//phase3のみで記録
@@ -79,8 +79,8 @@ int8_t phase = 3;
 
 /**/
 /*　ゴールの緯度経度　*/
-double LatG_deg = 0;  //後で変える
-double LongG_deg = 0; //後で変える
+double LatG_deg = 33.5948653;  //後で変える
+double LongG_deg = 130.2176766; //後で変える
 
 CalculateDistance* Factors_Distance;
 CalculateAngle* Factors_Angle;
@@ -207,7 +207,7 @@ void loop() {
     /* phase is 1 */
     /*頂点検知→第一回衝撃→着地検知*/
     if (IsShocked == 0) {
-      if (FallDetect(19.6 /*gx2*/, 50, 10, 10) == 1) {
+      if (FallDetect(25 /*gx3*/, 50, 10, 10) == 1) {
         IsShocked = 1;
       } else {
       }
@@ -327,7 +327,7 @@ void loop() {
         RotateMotor.rotateLeft(1, duty_70);
         */
         //degitalWrite
-        RotateMotor.rotateRight(1);
+        RotateMotor.rotateRight(2);
         RotateMotor.rotateLeft(1);
        
         Serial.println("前進中小距離");
@@ -404,7 +404,7 @@ void loop() {
         RotateMotor.rotateRight(1, duty_70);
         RotateMotor.rotateLeft(1, duty_70);
         */
-        RotateMotor.rotateRight(1);
+        RotateMotor.rotateRight(2);
         RotateMotor.rotateLeft(1);
 
         strcpy(state, "fwd");
@@ -714,7 +714,7 @@ void RecordCsv(){
 
     if(phase<3){
       snprintf(data, sizeof(data),
-      "%d,%d,%lf,%lf,%f,NA,NA,NA,NA\n",
+      "%d,%d,%lf,%lf,%f,0,NA,NA,NA\n",
       mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure);
 
       appendFile(SD, "/EtoE.csv", data);//要素
@@ -727,7 +727,7 @@ void RecordCsv(){
       angle = Factors_Angle->GetFactor_Alpha1();
 
       snprintf(data, sizeof(data),
-      "%d,%d,%lf,%lf,%f,NA,%lf,%lf,%s\n",
+      "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s\n",
       mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);
 
       appendFile(SD, "/EtoE.csv", data);//要素
