@@ -8,7 +8,8 @@
 #include "CalculateDistance.h"
 #include "CalculateAngle.h"
 #include <Arduino.h>
-#include <RotateMotor_tb6643kq.h>
+//#include <RotateMotor_tb6643kq.h>
+#include <RotateMotor.h>
 #include "MotorRegulation.h"
 #include "FS.h"
 #include "SD.h"
@@ -44,12 +45,14 @@ const uint8_t Max_Duty = 255;
 
 //drv用
 //MotorRegulaationクラスのインスタンスを作成
-MotorRegulation Motors(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
+//MotorRegulation Motors(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
 
 //tb6643kq用
 /*
 RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2, 50000, 8);
 */
+//degitalWrite
+RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
 
 
 /*タイマー設定*/
@@ -137,13 +140,14 @@ void setup() {
 
   /*モタドラ*/
   //tb6643kq用
+  //degitalWrite用
   //R_Ain1等のpinの設定をしてください
-  /*
+  
   pinMode(R_Ain1, OUTPUT);
   pinMode(R_Ain2, OUTPUT);
   pinMode(L_Ain1, OUTPUT);
   pinMode(L_Ain2, OUTPUT);
-  */
+  
 
   #ifdef REASSIGN_PINS
     SPI.begin(sck, miso, mosi, cs);
@@ -216,16 +220,22 @@ void loop() {
     /* phae is 2 */
     /* 分離 */
 
-    /*drv*/
-    
+    //drv
+    /*
     Motors.rotateRight(1, Max_Duty);//マックススピードで分離をする
     Motors.rotateLeft(1, Max_Duty);
-    
+    */
+
     //tb6643kq
     /*
     RotateMotor.rotateRight(1, Max_Duty);
     RotateMotor.rotateLeft(1, Max_Duty);
     */
+
+    //degitalWrite
+    RotateMotor.rotateRight(1);
+    RotateMotor.rotateLeft(1);
+
     Serial.println("分離作動開始");
 
     previous_Millis = millis();
@@ -239,10 +249,14 @@ void loop() {
     RotateMotor.rotateRight(0, duty_70);
     RotateMotor.rotateLeft(0, duty_70);
     */
-
     //drv用
+    /*
     Motors.rotateRight(0, duty_70);
     Motors.rotateLeft(0, duty_70);
+    */
+    //degitalWrite
+    RotateMotor.rotateRight(0);
+    RotateMotor.rotateLeft(0);
 
     phase = 3;
     break;
@@ -275,14 +289,18 @@ void loop() {
           Rotate_Time = constrain(angle/2.792, 300, 2187);
 
           //drv用
+          /*
           Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(1, Max_Duty);
-
+          Motors.rotateLeft(2, Max_Duty);
+          */
           //tb6643kq
           /*
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
           */
+          //dwgitalWrite
+          RotateMotor.rotateRight(0);
+          RotateMotor.rotateLeft(1);          
 
           Serial.println("右回転中小周り");
 
@@ -298,15 +316,19 @@ void loop() {
         //進む
 
         //drv
-        
-        Motors.rotateRight(1, duty_70);
-        Motors.rotateLeft(1, duty_70);
+        /*
+        Motors.rotateRight(2, duty_70);
+        Motors.rotateLeft(2, duty_70);
+        */
 
         //tb6643kq
         /*
         RotateMotor.rotateRight(1, duty_70);
         RotateMotor.rotateLeft(1, duty_70);
         */
+        //degitalWrite
+        RotateMotor.rotateRight(1);
+        RotateMotor.rotateLeft(1);
        
         Serial.println("前進中小距離");
 
@@ -320,14 +342,18 @@ void loop() {
 
         //止まる
         //drv
+        /*
         Motors.rotateRight(0, duty_70);
-        Motors.rotateLeft(0, duty_70);        
-
+        Motors.rotateLeft(0, duty_70);  
+        */      
         //tb6643kq
         /*
         RotateMotor.rotateRight(0, duty_70);
         RotateMotor.rotateLeft(0, duty_70);
         */
+        //degitalWrite
+        RotateMotor.rotateRight(0);
+        RotateMotor.rotateLeft(0);
 
         Serial.println("ブレーキ小距離");
 
@@ -343,14 +369,19 @@ void loop() {
           Rotate_Time = constrain(angle/2.792, 500, 1875);
           
           //drv
-          Motors.rotateRight(1, duty_70); 
-          Motors.rotateLeft(1, Max_Duty);
-
+          /*
+          Motors.rotateRight(0, duty_70); 
+          Motors.rotateLeft(2, Max_Duty);
+          /*
           //tb6643kq
           /*
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
           */
+          //degitalWrite
+          RotateMotor.rotateRight(0);
+          RotateMotor.rotateLeft(1);
+
           Serial.println("右回転中大回り");
 
           strcpy(state, "turn_R");
@@ -364,14 +395,18 @@ void loop() {
         }
         //進む
         //drv
-        Motors.rotateRight(1, duty_70);
-        Motors.rotateLeft(1, duty_70);
-        
+        /*
+        Motors.rotateRight(2, duty_70);
+        Motors.rotateLeft(2, duty_70);
+        */
         //tb6643kq
         /*
         RotateMotor.rotateRight(1, duty_70);
         RotateMotor.rotateLeft(1, duty_70);
         */
+        RotateMotor.rotateRight(1);
+        RotateMotor.rotateLeft(1);
+
         strcpy(state, "fwd");
 
         previous_Millis = millis();
@@ -382,15 +417,19 @@ void loop() {
 
         //止まる
         //drv
-        
+        /*
         Motors.rotateRight(0, duty_70);
         Motors.rotateLeft(0, duty_70);  
-        
+        */
         //tb6643kq
         /*
         RotateMotor.rotateRight(0, duty_70);
         RotateMotor.rotateLeft(0, duty_70);
         */
+        //degitalWrite
+        RotateMotor.rotateRight(0);
+        RotateMotor.rotateLeft(0);
+
         strcpy(state, "brk");
         
     }
@@ -653,8 +692,6 @@ float GetAzimuth() {
 
 
 void RecordCsv(){
-  Serial.print("current phase: ");
-  Serial.println(phase);
 
   current_SD_Millis = millis();
 
