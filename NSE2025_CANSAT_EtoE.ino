@@ -62,7 +62,6 @@ unsigned long bombtime_1 = 40000; /*後で変える*/
 unsigned long previous_bomb_Millis_2 = 0;
 unsigned long bombtime_2 = 30000; /*後で変える bombtime_2 must be less than bombtime_1*/
 unsigned long previous_SD_Millis = 0;
-unsigned long current_SD_Millis = 0;
 
 //SDで記録するグローバル変数
 uint16_t mission_time_SD = 1;
@@ -683,62 +682,49 @@ float GetAzimuth() {
   return yaw;
 }
 
-
+uint8_t Record_Start_Flag = 0; //開始から5秒立ったかのフラグ
 void RecordCsv(){
 
-  current_SD_Millis = millis();
-
-  if(current_SD_Millis - previous_SD_Millis > 1000){
-
-    pressure = GetPress();//SD用気圧取得
-
-    if (myGNSS.getPVT() == true) {  //SD用座標取得
-      LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
-      LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
-
-      Serial.print("lat: ");
-      Serial.println(LatMe_deg);
-      Serial.print("lon: ");
-      Serial.println(LongMe_deg);
-
-    }else {
-      Serial.println("座標の取得に失敗しました");
+  if(Record_Start_Flag == 0){
+    if(millis() - previous_SD_Millis > 5000){
+      Record_Start_Flag = 1;
     }
+  }else {
+    if(millis() - previous_SD_Millis > 1000){
 
-    if(phase<3){
-      snprintf(data, sizeof(data),
-      "%d,%d,%lf,%lf,%f,0,NA,NA,NA\n",
-      mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure);
+      pressure = GetPress();//SD用気圧取得
 
+      if (myGNSS.getPVT() == true) {  //SD用座標取得
+        LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
+        LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
+
+        Serial.print("lat: ");
+        Serial.println(LatMe_deg);
+        Serial.print("lon: ");
+        Serial.println(LongMe_deg);
+
+      }else {
+        Serial.println("座標の取得に失敗しました");
+      }
+
+      if(phase<3){
+        snprintf(data, sizeof(data),
+        "%d,%d,%lf,%lf,%f,0,NA,NA,NA\n",
+        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure);
+
+      } else{
+
+        distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);//キョリ取得
+        angle = Factors_Angle->GetFactor_Alpha1();//角度取得
+
+        snprintf(data, sizeof(data),
+        "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s\n",
+        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);
+      }
+      //SDに記録
       appendFile(SD, "/EtoE.csv", data);//要素
       mission_time_SD += 1;
       previous_SD_Millis = millis();
-
-    } else{
-
-      distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-      angle = Factors_Angle->GetFactor_Alpha1();
-
-      snprintf(data, sizeof(data),
-      "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s\n",
-      mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);
-
-      appendFile(SD, "/EtoE.csv", data);//要素
-      mission_time_SD += 1;
-      previous_SD_Millis = millis();
-
     }
   }
 }
-
-/*
-対地用
-行数はver.2のメインでの位置に準拠
-1.240行目  OverThresholdCountの初期値0が定義されていなかったので定義した
-2.247行目  247行目のwhile内でaccllistが更新されていないのでaccllist = GetAccl();を追加した
-3.247行目　247行目のwhile内でAvgAccに最初の代入&再代入が行われていないので255行目の繰り返しの前にAvgAcc=0.0;を追加した
-4.305行目　AvePress=0.0で初期化した
-5.328行目　AvePress=0.0で初期化した
-6.354行目　Variance=0.0で初期化した
-
-*/
