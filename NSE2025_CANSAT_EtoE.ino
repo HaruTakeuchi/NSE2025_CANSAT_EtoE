@@ -29,7 +29,7 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 float acc[3];
 
 /*標準気圧設定*/
-#define SEALEVELPRESSURE_HPA (1013.25);
+#define SEALEVELPRESSURE_HPA (1013.25)
 float BottomPress = 1013.25;
 double ThresholdPress = 999999;//頂点検知の閾値の気圧　現地で入力
 
@@ -38,6 +38,12 @@ double ThresholdPress = 999999;//頂点検知の閾値の気圧　現地で入�
 #define R_Ain2 1
 #define L_Ain1 2
 #define L_Ain2 21
+
+//SD用SPI設定
+#define sck 19
+#define miso 20
+#define mosi 18
+#define cs 17
 
 //モータの出力は70％→100％（255・0.7＝178.5）
 const uint8_t duty_70 = 180;
@@ -74,12 +80,13 @@ double angle = 0.0;//phase3のみで記録
 char state[50] = "brk";//タイヤの運動
 char data[200]; //SDに書き込む内容
 
+//初期phase
 int8_t phase = 1;
 
 /**/
 /*　ゴールの緯度経度　*/
-double LatG_deg = 33.5948653;  //後で変える
-double LongG_deg = 130.2176766; //後で変える
+double LatG_deg = 33.5948653;  //後で変えて！！！
+double LongG_deg = 130.2176766; //後で変えて！！！
 
 CalculateDistance* Factors_Distance;
 CalculateAngle* Factors_Angle;
@@ -147,27 +154,8 @@ void setup() {
   pinMode(L_Ain1, OUTPUT);
   pinMode(L_Ain2, OUTPUT);
 
-
-  #ifdef REASSIGN_PINS
-    SPI.begin(sck, miso, mosi, cs);
-    if (!SD.begin(cs)) {
-  #else
-    if (!SD.begin()) {
-  #endif
-    Serial.println("！SDカードのマウントに失敗しました");
-    return;
-    }else {
-    Serial.println("SDカードのマウントに成功しました");
-    }
-
-  uint8_t cardType = SD.cardType();
-
-  if (cardType == CARD_NONE) {
-    Serial.println("！SDカードがありません");
-    return;
-  }
-
-  writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
+  //SPI(SD用)の初期化
+  SPI.begin(sck, miso, mosi, cs);
 }
 
 
@@ -268,6 +256,10 @@ void loop() {
       十分長い時間でPWM7割:PWM10割=7:8くらいの走行距離差
       回す時間が短いほど相対的な走行距離の差は大きくなる
       PWMMAXで理論値979mm/sの理論値速さ*/
+      if (myGNSS.getPVT() == true) {
+        LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
+        LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
+      }
     distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
     angle = Factors_Angle->GetFactor_Alpha1();
 
@@ -276,7 +268,7 @@ void loop() {
       phase = 4;
 
     } else if(distance < 10){ //ゴールからの距離10m以下
-        if (0 > 0.174) {//10度以上
+        if (angle > 0.174) {//10度以上
           //方向修正
 
           //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
@@ -352,7 +344,7 @@ void loop() {
       }
 
     } else {  //ゴールからの距離10m以上
-        if (0 > 1.047) {//60度以上
+        if (angle > 1.047) {//60度以上
           //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
           //回す時間は最低でも500ms  ゴールとの距離がまだ遠いので安定性重視
           //回る角度は最大でも300度.つまり1875msの回転が最大
@@ -531,7 +523,6 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
       OverThresholdCount++;  //OverThresholdCountを1増やす
     }
 
-    //delay(addtime);
     previous_Millis = millis();
     while(millis() - previous_Millis < addtime){
       RecordCsv();
@@ -657,38 +648,29 @@ float AveVariance(int8_t VarianceNum) {
   return AveAreaVariance;
 }
 
-
-//ライブラリ作ったから多分いらん
-float GetAzimuth() {
-  /*
-  float AccRead[] = GetAcc();
-  float MagRead[] = GetMag();
-  float Roll = atan2(AccRead[1] / AccRead[2]);
-  float Pitch = atan2(-Accread[0] / sqrt(powf(AccRead[1] ,2) + powf((AccRead[2], 2))));
-  float YawNumerator = -((cos(Roll) * MagRead[1]) - (sin(Roll) * MagRead[2]));
-  float YawDenominator = (cos(Pitch) * MagRead[0]) + (sin(Pitch) * sin(Pitch) * MagRead[1]) + (sin(Pitch) * cos(Roll) * MagRead[2]);
-  float Yaw = atan2(YawNumerator / YawDenominator);
-
-  return Yaw;
-  */
-
-  imu::Quaternion quat = bno.getQuat();
-  imu::Vector<3> euler = quat.toEuler(); // クォータニオンからオイラー角に変換
-
-  float yaw = euler.z(); // Yaw (方位角)
-  //float roll = euler.x(); // Roll
-  //float pitch = euler.y(); // Pitch
-
-  return yaw;
-}
-
 uint8_t Record_Start_Flag = 0; //開始から5秒立ったかのフラグ
 void RecordCsv(){
 
   if(Record_Start_Flag == 0){
     if(millis() - previous_SD_Millis > 5000){
+
+      if (!SD.begin(cs)) {
+        Serial.println("！SDカードのマウントに失敗しました");
+        return;
+      }else {
+        Serial.println("SDカードのマウントに成功しました");
+      }
+
+      uint8_t cardType = SD.cardType();
+      if (cardType == CARD_NONE) {
+        Serial.println("！SDカードがありません");
+        return;
+      }
+      writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
       Record_Start_Flag = 1;
+      previous_SD_Millis = millis();
     }
+
   }else {
     if(millis() - previous_SD_Millis > 1000){
 
