@@ -11,6 +11,7 @@
 //#include <RotateMotor_tb6643kq.h>
 #include <RotateMotor.h>
 #include "MotorRegulation.h"
+#include "CalculateAngle_BNO055.h"
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
@@ -25,13 +26,16 @@ TaskHandle_t _p_task;
 /*　↓I2Cの設定*/
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
 
+//bnoの方位角取得ライブラリのインスタンス化
+BNO055_Heading headingSensor;
+
 //GetAccl
 float acc[3];
 
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25)
 float BottomPress = 1013.25; //地上気圧
-double ThresholdPress = 999999;//頂点検知の閾値の気圧　現地で入力
+double ThresholdPress = 999;//頂点検知の気圧　現地で入力
 
 //モタドラ設定
 #define R_Ain1 0
@@ -75,13 +79,19 @@ double LatMe_deg = 0;
 double LongMe_deg = 0;
 float pressure = 0.0;
 //float camera = 0.0;
-double distance = 0.0;//phase3のみで記録
-double angle = 0.0;//phase3のみで記録
+double distance = 0.0;//SD用phase3のみで記録
+double angle = 0.0;//SD用phase3のみで記録
 char state[50] = "brk";//タイヤの運動
 char data[200]; //SDに書き込む内容
 
+//北からゴールの角度を度数法に直したもの
+float degree_alpha1 = 0.0;
+
+//北からCanSatの向き(度数法)
+float myYaw = 0.0;
+
 //初期phase
-int8_t phase = 1;
+int8_t phase = 3; //!!!仮！
 
 
 /*　ゴールの緯度経度　*/
@@ -100,11 +110,14 @@ void setup() {
 
   Serial.begin(115200);
 
+  Wire.begin(); // I2C通信を開始
+
   /*以下BNO055*/
-  if (!bno.begin())
-  {
-    Serial.println("No BNO055 detected ... Check your wiring or I2C Address");
-    while (1);
+  if (headingSensor.begin()) {
+    Serial.println("Sensor initialized successfully.");
+  } else {
+    Serial.println("Failed to initialize BNO055. Check connections.");
+    while (1); // 失敗した場合はここで停止
   }
 
   bno.setExtCrystalUse(true);
@@ -183,7 +196,7 @@ void loop() {
     /*スイッチON→頂点検知*/
     //AveVarianceは後から数値を変更!要確認!
     //ThresholdPress,ListNumも後から数値を変更!要確認!
-    if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, 10) == 0) {
+    if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, 10) == 0) {//気圧が閾値より低い
       phase = 1;
     }
     break;
@@ -255,22 +268,26 @@ void loop() {
         LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
         LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
       }
-    distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-    angle = Factors_Angle->GetFactor_Alpha1();
 
-    if (distance < 2.5 /*|| カメラでゴール検知*/) {
-      //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
-      phase = 4;
+      headingSensor.update();
+      myYaw = headingSensor.getYaw();
+      distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+      degree_alpha1 = Factors_Angle->GetFactor_Alpha1() * 180 / PI;
+      angle = degree_alpha1 - myYaw;
 
-    } else if(distance < 10){ //ゴールからの距離10m以下
-        if (angle > 0.174) {//10度以上
+      if (distance < 2.5 /*|| カメラでゴール検知*/) {
+        //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
+        phase = 4;
+
+      } else if(distance < 10){ //ゴールからの距離10m以下
+        if (fabs(angle) > 10) {//10度以上
           //方向修正
 
           //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
           //回す時間は最低でも300ms  これ以上短いとトルクが足りない気がする(要検討)
           //回る角度は最大でも350度.つまり2187msの回転が最大
           //↑これ怖すぎ  350度は絶対安定して回せない  代案要検討
-          Rotate_Time = constrain(angle/2.792, 300, 2187);
+          Rotate_Time = constrain(fabs(angle)/160, 300, 2187);
 
           /*右回転//drv用
           Motors.rotateRight(0, duty_70);
@@ -279,9 +296,13 @@ void loop() {
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
           *///dwgitalWrite
-          RotateMotor.rotateRight(0);
-          RotateMotor.rotateLeft(1);
-
+          if(angle >= 0){
+            RotateMotor.rotateRight(0);
+            RotateMotor.rotateLeft(1);
+          } else{
+            RotateMotor.rotateRight(1);
+            RotateMotor.rotateLeft(0);
+          }
           strcpy(state, "turn_R");
           previous_Millis = millis();
           while(millis() - previous_Millis < Rotate_Time){
@@ -339,11 +360,11 @@ void loop() {
       }
 
     } else {  //ゴールからの距離10m以上
-        if (angle > 1.047) {//60度以上
+        if (fabs(angle) > 60) {//60度以上
           //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
           //回す時間は最低でも500ms  ゴールとの距離がまだ遠いので安定性重視
           //回る角度は最大でも300度.つまり1875msの回転が最大
-          Rotate_Time = constrain(angle/2.792, 500, 1875);
+          Rotate_Time = constrain(fabs(angle)/160, 500, 1875);
 
           /*右回転//drv
           Motors.rotateRight(0, duty_70);
@@ -352,8 +373,13 @@ void loop() {
           RotateMotor.rotateRight(0, duty_70);
           RotateMotor.rotateLeft(1, Max_Duty);
           *///degitalWrite
-          RotateMotor.rotateRight(0);
-          RotateMotor.rotateLeft(1);
+          if(angle >= 0){
+            RotateMotor.rotateRight(0);
+            RotateMotor.rotateLeft(1);
+          }else {
+            RotateMotor.rotateRight(1);
+            RotateMotor.rotateLeft(0);
+          }
 
           strcpy(state, "turn_R");
           previous_Millis = millis();
@@ -455,8 +481,8 @@ void ParallelTask(void *param) {
 
         //BottomPress, ListNumは後から数値を変更!要確認!
         if(CompareToBottomPress(BottomPress, 10) == 0) {
-          } else {
-            phase = 2;
+        }else {
+          phase = 2;
         }
 
         break;
@@ -515,13 +541,15 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
     OverThresholdCount++;  //OverThresholdCountを1増やす
   }
 
-
-  if(OverThresholdCount > OverThresholdNum){
-    return 1;
-  }
   previous_Millis = millis();
   while(millis() - previous_Millis < addtime){
     RecordCsv();
+  }
+
+  if(OverThresholdCount > OverThresholdNum){
+    return 1;
+  }else {
+    return 0;
   }
 }
 
@@ -535,17 +563,6 @@ void GetAccl(float* Acclist){
   Acclist[2] = accelerometerData.acceleration.z;
 }
 
-//いるか？これ
-float *GetMag() {
-  sensors_event_t magnetometerData;
-  bno.getEvent(&magnetometerData, Adafruit_BNO055::VECTOR_MAGNETOMETER);
-  double x = -1000000, y = -1000000 , z = -1000000; //dumb values, easy to spot problem
-  float Maglist[3] = {0, 0, 0};
-  Maglist[0] = magnetometerData.magnetic.x;
-  Maglist[1] = magnetometerData.magnetic.y;
-  Maglist[2] = magnetometerData.magnetic.z;
-  return Maglist;
-}
 
 //頂点検知で使う
 double ComparePress(double ThresholdPress, int8_t ListNum) {
@@ -563,7 +580,7 @@ double ComparePress(double ThresholdPress, int8_t ListNum) {
 
   AvePress = AvePress / ListNum;
 
-  if (AvePress <= ThresholdPress) {
+  if (AvePress <= ThresholdPress) {//気圧の平均が閾値より低ければ0・高ければ1を返す
     return 0;
   } else {
     return 1;
@@ -629,7 +646,7 @@ float PressVariance(int Period, int Num) {
 }
 
 float AveVariance(int8_t VarianceNum) {
-  float AveAreaVariance;
+  float AveAreaVariance = 0.0;
   for (int8_t i = 0; i < VarianceNum; i++) {
     AveAreaVariance += PressVariance(100, 10) / VarianceNum;
     /* τ=400で10個データを取る */
@@ -685,12 +702,15 @@ void RecordCsv(){
 
       } else{
 
-        distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);//キョリ取得
-        angle = Factors_Angle->GetFactor_Alpha1();//角度取得
+    headingSensor.update();
+    myYaw = headingSensor.getYaw();
+    distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+    degree_alpha1 = Factors_Angle->GetFactor_Alpha1() * 180 / PI;
+    angle = degree_alpha1 - myYaw;
 
         snprintf(data, sizeof(data),
         "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s\n",
-        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);
+        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);//仮
       }
       //SDに記録
       appendFile(SD, "/EtoE.csv", data);//要素
