@@ -30,7 +30,7 @@ float acc[3];
 
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25)
-float BottomPress = 1013.25;
+float BottomPress = 1013.25; //地上気圧
 double ThresholdPress = 999999;//頂点検知の閾値の気圧　現地で入力
 
 //モタドラ設定
@@ -63,10 +63,10 @@ RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
 
 /*タイマー設定*/
 unsigned long previous_Millis = 0; //delay書き換え用に使ってます
-unsigned long previous_bomb_Millis = 0;
-unsigned long bombtime_1 = 40000; /*後で変える*/
-unsigned long previous_bomb_Millis_2 = 0;
-unsigned long bombtime_2 = 30000; /*後で変える bombtime_2 must be less than bombtime_1*/
+unsigned long peak_detect_Millis = 0;
+unsigned long bombtime_1 = 240000; //頂点検知してから分離するまでの時限爆弾(4分)
+unsigned long shock_detect_Millis = 0;
+unsigned long bombtime_2 = 30000; //開傘検知してから分離するまでの時限爆弾
 unsigned long previous_SD_Millis = 0;
 
 //SDで記録するグローバル変数
@@ -83,7 +83,7 @@ char data[200]; //SDに書き込む内容
 //初期phase
 int8_t phase = 1;
 
-/**/
+
 /*　ゴールの緯度経度　*/
 double LatG_deg = 33.5948653;  //後で変えて！！！
 double LongG_deg = 130.2176766; //後で変えて！！！
@@ -164,7 +164,6 @@ void loop() {
 
   Serial.print("current phase: ");
   Serial.println(phase);
-  Serial.print(acc[0]);
 
   int Rotate_Time = 0;//モータを回転させる時間
 
@@ -186,20 +185,17 @@ void loop() {
     //ThresholdPress,ListNumも後から数値を変更!要確認!
     if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, 10) == 0) {
       phase = 1;
-    } else {
     }
     break;
 
   case 1:
     /* phase is 1 */
     /*頂点検知→第一回衝撃→着地検知*/
-    if (IsShocked == 0) {
-      if (FallDetect(25 /*gx3*/, 50, 10, 10) == 1) {
+    if(IsShocked == 0) {
+      if (FallDetect(39.2 /*gx4*/, 50, 10, 10) == 1) {//多分FallDetectは検知されない。空中分解が怖いので。
         IsShocked = 1;
-      } else {
+        shock_detect_Millis = millis();
       }
-    } else {
-      phase = 2;
     }
     break;
 
@@ -229,7 +225,6 @@ void loop() {
     while(millis() - previous_Millis < 5000){
       RecordCsv();
     }
-    //↑delay(5000);
 
     //tb6643kq用
     /*
@@ -438,29 +433,28 @@ void ParallelTask(void *param) {
       case 0:
         /* phase is 0 */
         /*スイッチON→頂点検知*/
-        previous_bomb_Millis = millis();
+        peak_detect_Millis = millis();
         break;
 
       case 1:
         /* phase is 1*/
         /*頂点検知→第一回衝撃→着地検知*/
-        unsigned long currentMillis = millis();
         //時限爆弾1
-        if((currentMillis - previous_bomb_Millis) >= bombtime_1) {
-        phase = 2;
+        if((millis() - peak_detect_Millis) >= bombtime_1) {
+          phase = 2;
         }
 
-        if (IsShocked == 1) {
-          unsigned long currentMillis_2 = millis();
-          //時限爆弾２
-          if ((currentMillis_2 - previous_bomb_Millis_2) >= bombtime_2) {
+        //開傘衝撃検知後の時限爆弾
+        if(IsShocked == 1) {
+          if ((millis() - shock_detect_Millis) >= bombtime_2) {
             phase = 2;
           }
-        } else {
-          previous_bomb_Millis_2 = millis();
+        }else {
+          shock_detect_Millis = millis();
         }
+
         //BottomPress, ListNumは後から数値を変更!要確認!
-        if (CompareToBottomPress(BottomPress, 10) == 0) {
+        if(CompareToBottomPress(BottomPress, 10) == 0) {
           } else {
             phase = 2;
         }
@@ -485,60 +479,57 @@ void ParallelTask(void *param) {
 }
 
 //-------------------------------------------------------------------------------------------
+int8_t OverThresholdCount = 0; //加速度が閾値を超えた回数を記録するグローバル変数
 int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8_t ListNum) {
   float FallList[ListNum] = {};
   float AvgAcc;
-  int8_t OverThresholdCount = 0;
+
 
   //FallListにListNum個の加速度を代入
   for (int i = 0; i < ListNum; i++) {
-    GetAccl(acc);
+    GetAccl(acc); //acc更新
     FallList[i] = sqrtf(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2));
   }
 
-  //OverThresholdCountがOverThresholdNumを超える、まで繰り返し。
-  while (OverThresholdCount < OverThresholdNum) {
 
-    //FallListを一つ前にずらして最後の値を更新
-    for (int j = 1; j < ListNum; j++) {
-      FallList[j-1] = FallList[j];
+  //FallListを一つ前にずらす
+  for (int j = 1; j < ListNum; j++) {
+    FallList[j-1] = FallList[j];
+  }
+  GetAccl(acc); //acc更新
+  FallList[ListNum-1] = sqrt(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2)); //FallListの最後の値を更新
+
+  AvgAcc = 0.0; //AvgAcc初期化(0にする)
+  //FallListの合計をAvgAccに代入
+  for (int k =0; k < ListNum; k++) {
+    AvgAcc += FallList[k];
+  }
+  //AvgAccをListNumで割って平均化
+  AvgAcc = AvgAcc/ListNum;
+
+  if (AvgAcc < threshold) {  //平均が閾値より小さい
+    if(OverThresholdCount >0 ) {  //且つOverThresholdCountが0以下じゃない
+      OverThresholdCount -= 1;  //OverThresholdCountを1減らす
     }
-
-    GetAccl(acc);
-    FallList[ListNum-1] = sqrt(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2));
-
-    AvgAcc = 0.0;
-    for (int k =0; k < ListNum; k++) {
-      AvgAcc += FallList[k];
-    }
-
-    AvgAcc = AvgAcc/ListNum;
-
-    if (AvgAcc < threshold) {  //平均が閾値より小さい
-      if(OverThresholdCount >0 ) {  //且つOverThresholdCountが0以下じゃない
-        OverThresholdCount -= 1;  //OverThresholdCountを1減らす
-      } else {
-      }
-    } else {  //平均が閾値より大きい
-      OverThresholdCount++;  //OverThresholdCountを1増やす
-    }
-
-    previous_Millis = millis();
-    while(millis() - previous_Millis < addtime){
-      RecordCsv();
-    }
-    Serial.println("ただいまFallDetect中");
+  }else {  //平均が閾値より大きい
+    OverThresholdCount++;  //OverThresholdCountを1増やす
   }
 
-  return 1;
 
+  if(OverThresholdCount > OverThresholdNum){
+    return 1;
+  }
+  previous_Millis = millis();
+  while(millis() - previous_Millis < addtime){
+    RecordCsv();
+  }
 }
 
 //FallDetectで使う
 void GetAccl(float* Acclist){
   sensors_event_t accelerometerData;
   bno.getEvent(&accelerometerData, Adafruit_BNO055::VECTOR_ACCELEROMETER);
-  double x = -1000000, y = -1000000 , z = -1000000;  
+  double x = -1000000, y = -1000000 , z = -1000000;
   Acclist[0] = accelerometerData.acceleration.x;
   Acclist[1] = accelerometerData.acceleration.y;
   Acclist[2] = accelerometerData.acceleration.z;
@@ -578,7 +569,6 @@ double ComparePress(double ThresholdPress, int8_t ListNum) {
     return 1;
   }
 }
-
 
 /*古い気圧データを捨てられてなくないか？(6/17)*/
 int8_t CompareToBottomPress(float BottomPress, int8_t ListNum) {
@@ -620,7 +610,6 @@ float PressVariance(int Period, int Num) {
     while(millis() - previous_Millis < Period){
       RecordCsv();
     }
-    //↑delay(Period);
   }
 
   /* P-tグラフにおいて、連続する2つの気圧とPeriodが成す四角形の面積を、気圧がNum[個]、四角形Num-1[個]求めてリストにする。　*/
@@ -653,6 +642,7 @@ void RecordCsv(){
 
   if(Record_Start_Flag == 0){
     if(millis() - previous_SD_Millis > 5000){
+      previous_SD_Millis = millis();
 
       if (!SD.begin(cs)) {
         Serial.println("！SDカードのマウントに失敗しました");
@@ -668,7 +658,6 @@ void RecordCsv(){
       }
       writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
       Record_Start_Flag = 1;
-      previous_SD_Millis = millis();
     }
 
   }else {
