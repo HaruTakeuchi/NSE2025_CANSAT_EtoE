@@ -24,10 +24,10 @@ SFE_UBLOX_GNSS myGNSS;
 TaskHandle_t _p_task;
 
 /*　↓I2Cの設定*/
-Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
+Adafruit_BNO055 BNO055;
 
 //bnoの方位角取得ライブラリのインスタンス化
-BNO055_Heading headingSensor;
+BNO055_Heading headingSensor(&BNO055);
 
 //GetAccl
 float acc[3];
@@ -120,7 +120,7 @@ void setup() {
     while (1); // 失敗した場合はここで停止
   }
 
-  bno.setExtCrystalUse(true);
+  BNO055.setExtCrystalUse(true);
 
   /*以下bme280*/
   if (!bme.begin(0x76, &Wire)) {
@@ -275,6 +275,14 @@ void loop() {
       degree_alpha1 = Factors_Angle->GetFactor_Alpha1() * 180 / PI;
       angle = degree_alpha1 - myYaw;
 
+      Serial.print("degree_alpha1");
+      Serial.println(degree_alpha1);
+      Serial.print("myYaw");
+      Serial.println(myYaw);
+      Serial.print("angle");
+      Serial.println(angle);
+
+
       if (distance < 2.5 /*|| カメラでゴール検知*/) {
         //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
         phase = 4;
@@ -287,7 +295,7 @@ void loop() {
           //回す時間は最低でも300ms  これ以上短いとトルクが足りない気がする(要検討)
           //回る角度は最大でも350度.つまり2187msの回転が最大
           //↑これ怖すぎ  350度は絶対安定して回せない  代案要検討
-          Rotate_Time = constrain(fabs(angle)/160, 300, 2187);
+          Rotate_Time = constrain(fabs(angle)*1000/160, 300, 2187);
 
           /*右回転//drv用
           Motors.rotateRight(0, duty_70);
@@ -364,7 +372,7 @@ void loop() {
           //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
           //回す時間は最低でも500ms  ゴールとの距離がまだ遠いので安定性重視
           //回る角度は最大でも300度.つまり1875msの回転が最大
-          Rotate_Time = constrain(fabs(angle)/160, 500, 1875);
+          Rotate_Time = constrain(fabs(angle)*1000/160, 500, 1875);
 
           /*右回転//drv
           Motors.rotateRight(0, duty_70);
@@ -556,7 +564,7 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
 //FallDetectで使う
 void GetAccl(float* Acclist){
   sensors_event_t accelerometerData;
-  bno.getEvent(&accelerometerData, Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  BNO055.getEvent(&accelerometerData, Adafruit_BNO055::VECTOR_ACCELEROMETER);
   double x = -1000000, y = -1000000 , z = -1000000;
   Acclist[0] = accelerometerData.acceleration.x;
   Acclist[1] = accelerometerData.acceleration.y;
