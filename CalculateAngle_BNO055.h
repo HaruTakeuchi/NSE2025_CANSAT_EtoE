@@ -10,7 +10,7 @@
 class BNO055_Heading {
 public:
   // コンストラクタ
-  BNO055_Heading();
+  BNO055_Heading(Adafruit_BNO055* BNO);
 
   // --- パブリックメソッド (メインプログラムから呼び出す関数) ---
   bool begin();
@@ -27,7 +27,7 @@ public:
 
 private:
   // --- プライベートメンバー変数 ---
-  Adafruit_BNO055 bno;
+  Adafruit_BNO055* bno;
   imu::Quaternion current_orientation;
   unsigned long last_time;
   float yaw_deg, pitch_deg, roll_deg;

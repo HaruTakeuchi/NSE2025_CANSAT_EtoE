@@ -5,16 +5,17 @@
 #include <Wire.h>
 
 // コンストラクタ
-BNO055_Heading::BNO055_Heading() : bno(55, 0x28) {
+BNO055_Heading::BNO055_Heading(Adafruit_BNO055* BNO)  {
   // 初期化リストでbnoオブジェクトを初期化
+  this->bno = BNO;
 }
 
 // センサーの初期化
 bool BNO055_Heading::begin() {
-  if (!bno.begin()) {
+  /*if (!bno.begin()) {
     return false;
   }
-  delay(1000);
+  delay(1000);*/
 
   if (read8(0x00) != 0xA0) {
     return false;
@@ -24,14 +25,14 @@ bool BNO055_Heading::begin() {
   delay(30);
 
   sensors_event_t mevent;
-  bno.getEvent(&mevent, Adafruit_BNO055::VECTOR_MAGNETOMETER);
+  bno->getEvent(&mevent, Adafruit_BNO055::VECTOR_MAGNETOMETER);
   double initial_yaw_rad = atan2(mevent.magnetic.y, mevent.magnetic.x);
 
   current_orientation = imu::Quaternion(
     cos(initial_yaw_rad / 2.0), 0.0, 0.0, sin(initial_yaw_rad / 2.0)
   );
 
-  write8(0x3D, 0x03); // GYROONLY_MODE
+  write8(0x3D, 0x0C); // GYROONLY_MODE
   delay(30);
 
   last_time = micros();
@@ -45,7 +46,7 @@ void BNO055_Heading::update() {
   last_time = current_time;
 
   sensors_event_t gevent;
-  bno.getEvent(&gevent, Adafruit_BNO055::VECTOR_GYROSCOPE);
+  bno->getEvent(&gevent, Adafruit_BNO055::VECTOR_GYROSCOPE);
   float gx_rads = gevent.gyro.x;
   float gy_rads = gevent.gyro.y;
   float gz_rads = gevent.gyro.z;
@@ -96,10 +97,10 @@ void BNO055_Heading::calculateEulerAngles() {
 
 void BNO055_Heading::updateCalibrationStatus() {
   uint8_t status = read8(0x35);
-  cal_sys = (status >> 6) & 0x03;
-  cal_gyr = (status >> 4) & 0x03;
-  cal_acc = (status >> 2) & 0x03;
-  cal_mag = status & 0x03;
+  cal_sys = (status >> 6) & 0x0C;
+  cal_gyr = (status >> 4) & 0x0C;
+  cal_acc = (status >> 2) & 0x0C;
+  cal_mag = status & 0x0C;
 }
 
 void BNO055_Heading::write8(byte reg, byte value) {
