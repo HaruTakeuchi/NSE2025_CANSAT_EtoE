@@ -258,6 +258,8 @@ void loop() {
     previous_Millis = millis();
     while(millis() - previous_Millis < 5000){
       RecordCsv();
+      headingSensor.update();
+      myYaw = headingSensor.getYaw();
     }
 
     //tb6643kq用
@@ -317,8 +319,7 @@ void loop() {
     Serial.print("angle=");
     Serial.println(angle , 7);
     Serial.println();
-      
-      
+
     if (distance < 5 /*|| カメラでゴール検知*/) {
       //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
       phase = 4;
@@ -330,7 +331,7 @@ void loop() {
       //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
       //(回す時間は最低でも300ms  これ以上短いとトルクが足りない気がする(要検討))
       //回る角度は最大でも350度.つまり2187msの回転が最大
-      
+
       //両輪回転で620度/s
       Rotate_Time = constrain(fabs(angle)*1000/620/9, fabs(angle)*1000/620/9, 1000);
 
@@ -353,6 +354,8 @@ void loop() {
       previous_Millis = millis();
       while(millis() - previous_Millis < Rotate_Time){
         RecordCsv();
+        headingSensor.update();
+        myYaw = headingSensor.getYaw();
       }
 
       /*8秒止まる//drv
@@ -368,6 +371,8 @@ void loop() {
       previous_Millis = millis();
       while(millis() - previous_Millis < 8000){
         RecordCsv();
+        headingSensor.update();
+        myYaw = headingSensor.getYaw();
       }
 
       } else{
@@ -384,6 +389,8 @@ void loop() {
         previous_Millis = millis();  //約1m進む
         while(millis() - previous_Millis < 1200){
           RecordCsv();
+          headingSensor.update();
+          myYaw = headingSensor.getYaw();
         }
 
         /*8秒止まる//drv
@@ -399,6 +406,8 @@ void loop() {
         previous_Millis = millis();
         while(millis() - previous_Millis < 8000){
           RecordCsv();
+          headingSensor.update();
+          myYaw = headingSensor.getYaw();
         }
       }
 
@@ -430,6 +439,8 @@ void loop() {
         previous_Millis = millis();
         while(millis() - previous_Millis < Rotate_Time){
           RecordCsv();
+          headingSensor.update();
+          myYaw = headingSensor.getYaw();
         }
 
         /*8秒止まる//drv
@@ -445,6 +456,8 @@ void loop() {
         previous_Millis = millis();
         while(millis() - previous_Millis < 8000){
           RecordCsv();
+          headingSensor.update();
+          myYaw = headingSensor.getYaw();
         }
       }else {
         /*5m進む//drv
@@ -460,6 +473,8 @@ void loop() {
         previous_Millis = millis();
         while(millis() - previous_Millis < 6000){
           RecordCsv();
+          headingSensor.update();
+          myYaw = headingSensor.getYaw();
         }
 
         //8秒止まる
@@ -476,10 +491,12 @@ void loop() {
         previous_Millis = millis();
         while(millis() - previous_Millis < 8000){
           RecordCsv();
+          headingSensor.update();
+          myYaw = headingSensor.getYaw();
         }
       }
     }
-    
+
   break;
 
   case 4:
@@ -498,6 +515,8 @@ void loop() {
 void ParallelTask(void *param) {
   while(true) {
     RecordCsv();
+    headingSensor.update();
+    myYaw = headingSensor.getYaw();
     switch (phase)
     {
       case 0:
@@ -549,52 +568,47 @@ void ParallelTask(void *param) {
 }
 
 //-------------------------------------------------------------------------------------------
-int8_t OverThresholdCount = 0; //加速度が閾値を超えた回数を記録するグローバル変数
 int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8_t ListNum) {
   float FallList[ListNum] = {};
   float AvgAcc;
-
-
+  int8_t OverThresholdCount = 0; //加速度が閾値を超えた回数を記録する変数
   //FallListにListNum個の加速度を代入
   for (int i = 0; i < ListNum; i++) {
     GetAccl(acc); //acc更新
     FallList[i] = sqrtf(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2));
   }
-
-
-  //FallListを一つ前にずらす
-  for (int j = 1; j < ListNum; j++) {
-    FallList[j-1] = FallList[j];
-  }
-  GetAccl(acc); //acc更新
-  FallList[ListNum-1] = sqrt(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2)); //FallListの最後の値を更新
-
-  AvgAcc = 0.0; //AvgAcc初期化(0にする)
-  //FallListの合計をAvgAccに代入
-  for (int k =0; k < ListNum; k++) {
-    AvgAcc += FallList[k];
-  }
-  //AvgAccをListNumで割って平均化
-  AvgAcc = AvgAcc/ListNum;
-
-  if (AvgAcc < threshold) {  //平均が閾値より小さい
-    if(OverThresholdCount >0 ) {  //且つOverThresholdCountが0以下じゃない
-      OverThresholdCount -= 1;  //OverThresholdCountを1減らす
+  while (OverThresholdCount < OverThresholdNum) {
+    //FallListを一つ前にずらす
+    for (int j = 1; j < ListNum; j++) {
+      FallList[j-1] = FallList[j];
     }
-  }else {  //平均が閾値より大きい
-    OverThresholdCount++;  //OverThresholdCountを1増やす
-  }
+    GetAccl(acc); //acc更新
+    FallList[ListNum-1] = sqrt(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2)); //FallListの最後の値を更新
 
-  previous_Millis = millis();
-  while(millis() - previous_Millis < addtime){
-    RecordCsv();
-  }
+    AvgAcc = 0.0; //AvgAcc初期化(0にする)
+    //FallListの合計をAvgAccに代入
+    for (int k =0; k < ListNum; k++) {
+      AvgAcc += FallList[k];
+    }
+    //AvgAccをListNumで割って平均化
+    AvgAcc = AvgAcc/ListNum;
 
-  if(OverThresholdCount > OverThresholdNum){
-    return 1;
-  }else {
-    return 0;
+    if (AvgAcc < threshold) {  //平均が閾値より小さい
+      if(OverThresholdCount >0 ) {  //且つOverThresholdCountが0以下じゃない
+        OverThresholdCount -= 1;  //OverThresholdCountを1減らす
+      }
+    }else {  //平均が閾値より大きい
+      OverThresholdCount++;  //OverThresholdCountを1増やす
+    }
+
+    previous_Millis = millis();
+    while(millis() - previous_Millis < addtime){
+      RecordCsv();
+      headingSensor.update();
+      myYaw = headingSensor.getYaw();
+    }
   }
+  return 1;
 }
 
 //FallDetectで使う
@@ -670,6 +684,8 @@ float PressVariance(int Period, int Num) {
     previous_Millis = millis();
     while(millis() - previous_Millis < Period){
       RecordCsv();
+      headingSensor.update();
+      myYaw = headingSensor.getYaw();
     }
   }
 
@@ -749,8 +765,8 @@ void RecordCsv(){
     angle = degree_alpha1 - myYaw;*/
 
         snprintf(data, sizeof(data),
-        "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s,%f,%f\n",//仮
-        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state,degree_alpha1,myYaw);//仮
+        "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s,\n",
+        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure,distance,angle,state);
       }
       //SDに記録
       appendFile(SD, "/EtoE.csv", data);//要素
