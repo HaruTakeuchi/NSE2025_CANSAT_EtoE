@@ -20,6 +20,14 @@ CalculateDistance::CalculateDistance(double LatMe_deg, double LatG_deg, double L
 #else
 #endif
 
+void CalculateDistance::updateLocation(double LatMe_deg, double LongMe_deg) {
+    // 新しい現在地でラジアン値を更新
+    LatMe_rad = ToRad(LatMe_deg);
+    LongMe_rad = ToRad(LongMe_deg);
+    // 座標が変わったので、Thetaの初期値も再計算
+    PreTheta = SetThetaZero();
+}
+
 double CalculateDistance::ToRad(double degree) {
     return degree * DEG_TO_RAD;
 }

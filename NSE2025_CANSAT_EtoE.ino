@@ -20,6 +20,15 @@
 Adafruit_BME280 bme;
 SFE_UBLOX_GNSS myGNSS;
 
+// GNSSをhigh performance modeにするやつ
+uint8_t conf_ublox_high_performance_mode[] = {0xB5, 0x62, 0x06, 0x41, 0x10, 0x00, 0x03, 0x00, 0x04, 0x1F, 0x54, 0x5E, 0x79, 0xBF, 0x28, 0xEF, 0x12, 0x05, 0xFD, 0xFF, 0xFF, 0xFF, 0x8F, 0x0D, 0xB5, 0x62, 0x06, 0x41, 0x1C,
+0x00, 0x04, 0x01, 0xA4, 0x10, 0xBD, 0x34, 0xF9, 0x12, 0x28, 0xEF, 0x12, 0x05, 0x05, 0x00, 0xA4, 0x40, 0x00, 0xB0, 0x71, 0x0B, 0x0A, 0x00, 0xA4, 0x40, 0x00, 0xD8, 0xB8, 0x05, 0xDE, 0xAE};
+// QZSS L1S有効化&SLAS有効化
+uint8_t conf_ublox_slas_mode[] = {0xB5, 0x62, 0x06, 0x8A, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x00, 0x14, 0x00, 0x31, 0x10, 0x01, 0x05, 0x00, 0x37, 0x10, 0x01, 0x42, 0x28};
+
+// gnssモジュールのi2cアドレス
+uint8_t gnssAddr = 0x42;
+
 /*並列処理用タスク定義*/
 TaskHandle_t _p_task;
 
@@ -95,8 +104,8 @@ int8_t phase = 3; //!!!仮！
 
 
 /*　ゴールの緯度経度　*/
-double LatG_deg = 33.5948653;  //後で変えて！！！
-double LongG_deg = 130.2176766; //後で変えて！！！
+double LatG_deg = 33.5947198;  //後で変えて！！！
+double LongG_deg = 130.2181638; //後で変えて！！！
 
 CalculateDistance* Factors_Distance;
 CalculateAngle* Factors_Angle;
@@ -106,13 +115,17 @@ int8_t IsShocked = 0;
 
 //-------------------------------------------------------------------------------------------
 void setup() {
-  // put your setup code here, to run once:
-
   Serial.begin(115200);
-
   Wire.begin(); // I2C通信を開始
 
   /*以下BNO055*/
+  if (BNO055.begin()) {
+    Serial.println("Sensor initialized successfully.");
+  } else {
+    Serial.println("Failed to initialize BNO055. Check connections.");
+    while (1); // 失敗した場合はここで停止
+  }
+
   if (headingSensor.begin()) {
     Serial.println("Sensor initialized successfully.");
   } else {
@@ -137,6 +150,9 @@ void setup() {
   }
 
   myGNSS.setI2COutput(COM_TYPE_UBX);
+
+  //GNSSを高精度モードに変更
+  change_gnss_working_mode();
 
   /*並列処理用タスク設定*/
   xTaskCreatePinnedToCore(
@@ -171,16 +187,22 @@ void setup() {
   SPI.begin(sck, miso, mosi, cs);
 }
 
-
-//-------------------------------------------------------------------------------------------
+//gnss高精度モード
+void change_gnss_working_mode() {
+  Wire.beginTransmission(gnssAddr);
+  Wire.write(conf_ublox_high_performance_mode, 60);
+  delay(500);
+  Wire.write(conf_ublox_slas_mode, 22);
+  delay(500);
+  myGNSS.setDynamicModel(DYN_MODEL_STATIONARY);
+}
+//---------------------------------------------------------------------------------------------
 void loop() {
-
   Serial.print("current phase: ");
   Serial.println(phase);
 
   int Rotate_Time = 0;//モータを回転させる時間
-
-
+  
   /*
   phase0 : スイッチON→頂点検知
   phase1 : 頂点検知→第一回衝撃→着地検知
@@ -188,9 +210,8 @@ void loop() {
   phase3 : 分離機構作動→ゴール検知
   phase4 : ゴール検知
   */
-
   switch (phase)
-  {
+    {
   case 0:
     /* phase is 0 */
     /*スイッチON→頂点検知*/
@@ -264,199 +285,214 @@ void loop() {
       十分長い時間でPWM7割:PWM10割=7:8くらいの走行距離差
       回す時間が短いほど相対的な走行距離の差は大きくなる
       PWMMAXで理論値979mm/sの理論値速さ*/
-      if (myGNSS.getPVT() == true) {
-        LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
-        LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
-      }
-
-      headingSensor.update();
-      myYaw = headingSensor.getYaw();
-      distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-      degree_alpha1 = Factors_Angle->GetFactor_Alpha1() * 180 / PI;
-      angle = degree_alpha1 - myYaw;
-
-      Serial.print("degree_alpha1");
-      Serial.println(degree_alpha1);
-      Serial.print("myYaw");
-      Serial.println(myYaw);
-      Serial.print("angle");
-      Serial.println(angle);
-
-
-      if (distance < 2.5 /*|| カメラでゴール検知*/) {
-        //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
-        phase = 4;
-
-      } else if(distance < 10){ //ゴールからの距離10m以下
-        if (fabs(angle) > 10) {//10度以上
-          //方向修正
-
-          //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
-          //回す時間は最低でも300ms  これ以上短いとトルクが足りない気がする(要検討)
-          //回る角度は最大でも350度.つまり2187msの回転が最大
-          //↑これ怖すぎ  350度は絶対安定して回せない  代案要検討
-          Rotate_Time = constrain(fabs(angle)*1000/160, 300, 2187);
-
-          /*右回転//drv用
-          Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(2, Max_Duty);
-          //tb6643kq
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(1, Max_Duty);
-          *///dwgitalWrite
-          if(angle >= 0){
-            RotateMotor.rotateRight(0);
-            RotateMotor.rotateLeft(1);
-          } else{
-            RotateMotor.rotateRight(1);
-            RotateMotor.rotateLeft(0);
-          }
-          strcpy(state, "turn_R");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < Rotate_Time){
-            RecordCsv();
-          }
-
-          /*3秒止まる//drv
-          Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(0, duty_70);
-          //tb6643kq
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(0, duty_70);
-          *///degitalWrite
-          RotateMotor.rotateRight(0);
-          RotateMotor.rotateLeft(0);
-
-          strcpy(state, "brk");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 3000){
-            RecordCsv();
-          }
-
-        } else{
-          /*1m進む//drv
-          Motors.rotateRight(2, duty_70);
-          Motors.rotateLeft(2, duty_70);
-          //tb6643kq
-          RotateMotor.rotateRight(1, duty_70);
-          RotateMotor.rotateLeft(1, duty_70);
-          *///degitalWrite
-          RotateMotor.rotateRight(2);
-          RotateMotor.rotateLeft(1);
-
-          strcpy(state, "fwd");
-          previous_Millis = millis();  //約1m進む
-          while(millis() - previous_Millis < 1200){
-            RecordCsv();
-          }
-
-          /*3秒止まる//drv
-          Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(0, duty_70);
-          //tb6643kq
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(0, duty_70);
-          *///degitalWrite
-          RotateMotor.rotateRight(0);
-          RotateMotor.rotateLeft(0);
-
-          strcpy(state, "brk");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 3000){
-            RecordCsv();
-          }
-      }
-
-    } else {  //ゴールからの距離10m以上
-        if (fabs(angle) > 60) {//60度以上
-          //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
-          //回す時間は最低でも500ms  ゴールとの距離がまだ遠いので安定性重視
-          //回る角度は最大でも300度.つまり1875msの回転が最大
-          Rotate_Time = constrain(fabs(angle)*1000/160, 500, 1875);
-
-          /*右回転//drv
-          Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(2, Max_Duty);
-          //tb6643kq
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(1, Max_Duty);
-          *///degitalWrite
-          if(angle >= 0){
-            RotateMotor.rotateRight(0);
-            RotateMotor.rotateLeft(1);
-          }else {
-            RotateMotor.rotateRight(1);
-            RotateMotor.rotateLeft(0);
-          }
-
-          strcpy(state, "turn_R");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < Rotate_Time){
-            RecordCsv();
-          }
-
-          /*1秒止まる//drv
-          Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(0, duty_70);
-          //tb6643kq
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(0, duty_70);
-          *///degitalWrite
-          RotateMotor.rotateRight(0);
-          RotateMotor.rotateLeft(0);
-
-          strcpy(state, "brk");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 1000){
-            RecordCsv();
-          }
-        } else{
-          /*10m進む//drv
-          Motors.rotateRight(2, duty_70);
-          Motors.rotateLeft(2, duty_70);
-          //tb6643kq
-          RotateMotor.rotateRight(1, duty_70);
-          RotateMotor.rotateLeft(1, duty_70);
-          *///degitalWrite
-          RotateMotor.rotateRight(2);
-          RotateMotor.rotateLeft(1);
-
-          strcpy(state, "fwd");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 12000){
-            RecordCsv();
-          }
-
-          //1秒止まる
-          /*//drv
-          Motors.rotateRight(0, duty_70);
-          Motors.rotateLeft(0, duty_70);
-          //tb6643kq
-          RotateMotor.rotateRight(0, duty_70);
-          RotateMotor.rotateLeft(0, duty_70);
-          *///degitalWrite
-          RotateMotor.rotateRight(0);
-          RotateMotor.rotateLeft(0);
-
-          strcpy(state, "brk");
-          previous_Millis = millis();
-          while(millis() - previous_Millis < 1000){
-            RecordCsv();
-          }
-      }
-
+    if (myGNSS.getPVT() == true) {
+      LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
+      LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
     }
+
+    headingSensor.update();
+    myYaw = headingSensor.getYaw();
+    Factors_Distance->updateLocation(LatMe_deg, LongMe_deg);
+    distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+    Factors_Angle->Coordinates(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+    degree_alpha1 = Factors_Angle->GetFactor_Alpha1();
+    degree_alpha1 = degree_alpha1 * 180 / PI;
+    angle = degree_alpha1 - myYaw;
+
+    Serial.print("LatMe_deg= ");
+    Serial.print(LatMe_deg , 7);
+    Serial.println();
+    Serial.print("LongMe_deg= ");
+    Serial.print(LongMe_deg , 7);
+    Serial.println();
+    Serial.print("distance= ");
+    Serial.print(distance , 10);
+    Serial.println();
+    Serial.print("degree_alpha1=");
+    Serial.print(degree_alpha1 , 7);
+    Serial.println();
+    Serial.print("myYaw=");
+    Serial.print(myYaw , 7);
+    Serial.println();
+    Serial.print("angle=");
+    Serial.println(angle , 7);
+    Serial.println();
+      
+      
+    if (distance < 5 /*|| カメラでゴール検知*/) {
+      //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
+      phase = 4;
+
+    } else if(distance < 10){ //ゴールからの距離10m以下
+      if (fabs(angle) > 10) {//10度以上
+      //方向修正
+
+      //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
+      //(回す時間は最低でも300ms  これ以上短いとトルクが足りない気がする(要検討))
+      //回る角度は最大でも350度.つまり2187msの回転が最大
+      
+      //両輪回転で620度/s
+      Rotate_Time = constrain(fabs(angle)*1000/620/9, fabs(angle)*1000/620/9, 1000);
+
+      /*右回転//drv用
+      Motors.rotateRight(0, duty_70);
+      Motors.rotateLeft(2, Max_Duty);
+      //tb6643kq
+      RotateMotor.rotateRight(0, duty_70);
+      RotateMotor.rotateLeft(1, Max_Duty);
+      *///dwgitalWrite
+      if(angle >= 0){
+        RotateMotor.rotateRight(2);
+        RotateMotor.rotateLeft(1);
+        strcpy(state, "turn_R");
+      } else{
+        RotateMotor.rotateRight(1);
+        RotateMotor.rotateLeft(2);
+        strcpy(state, "turn_L");
+      }
+      previous_Millis = millis();
+      while(millis() - previous_Millis < Rotate_Time){
+        RecordCsv();
+      }
+
+      /*8秒止まる//drv
+      Motors.rotateRight(0, duty_70);
+      Motors.rotateLeft(0, duty_70);
+      //tb6643kq
+      RotateMotor.rotateRight(0, duty_70);
+      RotateMotor.rotateLeft(0, duty_70);
+      *///degitalWrite
+      RotateMotor.rotateRight(0);
+      RotateMotor.rotateLeft(0);
+      strcpy(state, "brk");
+      previous_Millis = millis();
+      while(millis() - previous_Millis < 8000){
+        RecordCsv();
+      }
+
+      } else{
+        /*1m進む//drv
+        Motors.rotateRight(2, duty_70);
+        Motors.rotateLeft(2, duty_70);
+        //tb6643kq
+        RotateMotor.rotateRight(1, duty_70);
+        RotateMotor.rotateLeft(1, duty_70);
+        *///degitalWrite
+        RotateMotor.rotateRight(1);
+        RotateMotor.rotateLeft(1);
+        strcpy(state, "fwd");
+        previous_Millis = millis();  //約1m進む
+        while(millis() - previous_Millis < 1200){
+          RecordCsv();
+        }
+
+        /*8秒止まる//drv
+        Motors.rotateRight(0, duty_70);
+        Motors.rotateLeft(0, duty_70);
+        //tb6643kq
+        RotateMotor.rotateRight(0, duty_70);
+        RotateMotor.rotateLeft(0, duty_70);
+        *///degitalWrite
+        RotateMotor.rotateRight(0);
+        RotateMotor.rotateLeft(0);
+        strcpy(state, "brk");
+        previous_Millis = millis();
+        while(millis() - previous_Millis < 8000){
+          RecordCsv();
+        }
+      }
+
+  }else {  //ゴールからの距離10m以上
+      if (fabs(angle) > 60) {//60度以上
+        //↓160度=2.792rad    つまりangle/2.792は回転させる秒数
+        //回す時間は最低でも500ms  ゴールとの距離がまだ遠いので安定性重視
+        //回る角度は最大でも300度.つまり1875msの回転が最大
+
+        //両輪回転で620度/s
+        Rotate_Time = constrain(fabs(angle)*1000 / 620 / 9, fabs(angle)*1000/620/9, 1000);
+
+        /*右回転//drv
+        Motors.rotateRight(0, duty_70);
+        Motors.rotateLeft(2, Max_Duty);
+        //tb6643kq
+        RotateMotor.rotateRight(0, duty_70);
+        RotateMotor.rotateLeft(1, Max_Duty);
+        *///degitalWrite
+        if(angle >= 0){
+          RotateMotor.rotateRight(2);
+          RotateMotor.rotateLeft(1);
+          strcpy(state, "turn_R");
+        }else {
+          RotateMotor.rotateRight(1);
+          RotateMotor.rotateLeft(2);
+          strcpy(state, "turn_L");
+        }
+        previous_Millis = millis();
+        while(millis() - previous_Millis < Rotate_Time){
+          RecordCsv();
+        }
+
+        /*8秒止まる//drv
+        Motors.rotateRight(0, duty_70);
+        Motors.rotateLeft(0, duty_70);
+        //tb6643kq
+        RotateMotor.rotateRight(0, duty_70);
+        RotateMotor.rotateLeft(0, duty_70);
+        *///degitalWrite
+        RotateMotor.rotateRight(0);
+        RotateMotor.rotateLeft(0);
+        strcpy(state, "brk");
+        previous_Millis = millis();
+        while(millis() - previous_Millis < 8000){
+          RecordCsv();
+        }
+      }else {
+        /*5m進む//drv
+        Motors.rotateRight(2, duty_70);
+        Motors.rotateLeft(2, duty_70);
+        //tb6643kq
+        RotateMotor.rotateRight(1, duty_70);
+        RotateMotor.rotateLeft(1, duty_70);
+        *///degitalWrite
+        RotateMotor.rotateRight(1);
+        RotateMotor.rotateLeft(1);
+        strcpy(state, "fwd");
+        previous_Millis = millis();
+        while(millis() - previous_Millis < 6000){
+          RecordCsv();
+        }
+
+        //8秒止まる
+        /*//drv
+        Motors.rotateRight(0, duty_70);
+        Motors.rotateLeft(0, duty_70);
+        //tb6643kq
+        RotateMotor.rotateRight(0, duty_70);
+        RotateMotor.rotateLeft(0, duty_70);
+        *///degitalWrite
+        RotateMotor.rotateRight(0);
+        RotateMotor.rotateLeft(0);
+        strcpy(state, "brk");
+        previous_Millis = millis();
+        while(millis() - previous_Millis < 8000){
+          RecordCsv();
+        }
+      }
+    }
+    
   break;
 
   case 4:
     /* phase is 4 */
     /* ゴール検知 */
-
+        ///degitalWrite
+    RotateMotor.rotateRight(0);
+    RotateMotor.rotateLeft(0);
+    strcpy(state, "brk");
   break;
-
-
   }
 }
+
 
 //-------------------------------------------------------------------------------------------
 void ParallelTask(void *param) {
@@ -681,7 +717,7 @@ void RecordCsv(){
         Serial.println("！SDカードがありません");
         return;
       }
-      writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state \n");//ヘッダ
+      writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state,degree_alpha1,myYaw \n");//ヘッダ
       Record_Start_Flag = 1;
     }
 
@@ -694,11 +730,6 @@ void RecordCsv(){
         LatMe_deg = myGNSS.getLatitude() / pow(10, 7);
         LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
 
-        Serial.print("lat: ");
-        Serial.println(LatMe_deg);
-        Serial.print("lon: ");
-        Serial.println(LongMe_deg);
-
       }else {
         Serial.println("座標の取得に失敗しました");
       }
@@ -710,15 +741,16 @@ void RecordCsv(){
 
       } else{
 
-    headingSensor.update();
+/*    headingSensor.update();
     myYaw = headingSensor.getYaw();
     distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+    Factors_Angle->Coordinates(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
     degree_alpha1 = Factors_Angle->GetFactor_Alpha1() * 180 / PI;
-    angle = degree_alpha1 - myYaw;
+    angle = degree_alpha1 - myYaw;*/
 
         snprintf(data, sizeof(data),
-        "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s\n",
-        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state);//仮
+        "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s,%f,%f\n",//仮
+        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure, distance, angle, state,degree_alpha1,myYaw);//仮
       }
       //SDに記録
       appendFile(SD, "/EtoE.csv", data);//要素

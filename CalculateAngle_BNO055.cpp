@@ -26,7 +26,8 @@ bool BNO055_Heading::begin() {
 
   sensors_event_t mevent;
   bno->getEvent(&mevent, Adafruit_BNO055::VECTOR_MAGNETOMETER);
-  double initial_yaw_rad = atan2(mevent.magnetic.y, mevent.magnetic.x);
+  double initial_yaw_rad = 0;
+
 
   current_orientation = imu::Quaternion(
     cos(initial_yaw_rad / 2.0), 0.0, 0.0, sin(initial_yaw_rad / 2.0)

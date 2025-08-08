@@ -20,6 +20,7 @@ class CalculateDistance {
         CalculateDistance(double LatMe_deg, double LatG_deg, double LonMe_deg, double LonG_deg);
         #else
         #endif
+        void updateLocation(double latMe_deg, double lonMe_deg);
         double ToRad(double degree);
         double GetFactor_l();
         double GetFactor_l_1();
