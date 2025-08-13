@@ -16,7 +16,6 @@
 #include "SD.h"
 #include "SPI.h"
 #include "SD_Record.h"
-#include <Adafruit_NeoPixel.h>
 
 Adafruit_BME280 bme;
 SFE_UBLOX_GNSS myGNSS;
@@ -63,14 +62,6 @@ double ThresholdPress = 993.5;//頂点検知の気圧　現地で入力
 const uint8_t duty_70 = 180;
 const uint8_t Max_Duty = 255;
 
-//drv用
-//MotorRegulaationクラスのインスタンスを作成
-//MotorRegulation Motors(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
-
-//tb6643kq用
-/*
-RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2, 50000, 8);
-*/
 //degitalWrite
 RotateMotor RotateMotor(R_Ain1, R_Ain2, L_Ain1, L_Ain2);
 
@@ -114,8 +105,6 @@ CalculateAngle* Factors_Angle;
 /*落下検知設定*/
 int8_t IsShocked = 0;
 
-//デバッグ用のLEDのインスタンス化
-Adafruit_NeoPixel pixels(1, 17, NEO_GRB + NEO_KHZ800);
 
 
 int numnum = 99; //仮デバッグ用
@@ -165,8 +154,6 @@ void setup() {
   //GNSSを高精度モードに変更
   change_gnss_working_mode();
 
-  //LEDの初期化
-  pixels.begin();
   /*並列処理用タスク設定*/
   xTaskCreatePinnedToCore(
     ParallelTask,   // タスク関数へのポインタ(スレッドで実行させたい関数を設定)
@@ -187,7 +174,6 @@ void setup() {
 
 
   /*モタドラ*/
-  //tb6643kq用
   //degitalWrite用
   //R_Ain1等のpinの設定をしてください
 
@@ -226,7 +212,6 @@ void loop() {
   switch (phase)
     {
   case 0:
-    pixels.clear();
     /* phase is 0 */
     /*スイッチON→頂点検知*/
     //AveVarianceは後から数値を変更!要確認!
@@ -252,18 +237,6 @@ void loop() {
     /* phae is 2 */
     /* 分離 */
 
-    //drv
-    /*
-    Motors.rotateRight(1, Max_Duty);//マックススピードで分離をする
-    Motors.rotateLeft(1, Max_Duty);
-    */
-
-    //tb6643kq
-    /*
-    RotateMotor.rotateRight(1, Max_Duty);
-    RotateMotor.rotateLeft(1, Max_Duty);
-    */
-
     //degitalWrite
     RotateMotor.rotateRight(1);
     RotateMotor.rotateLeft(1);
@@ -278,16 +251,6 @@ void loop() {
       myYaw = headingSensor.getYaw();
     }
 
-    //tb6643kq用
-    /*
-    RotateMotor.rotateRight(0, duty_70);
-    RotateMotor.rotateLeft(0, duty_70);
-    */
-    //drv用
-    /*
-    Motors.rotateRight(0, duty_70);
-    Motors.rotateLeft(0, duty_70);
-    */
     //degitalWrite
     RotateMotor.rotateRight(0);
     RotateMotor.rotateLeft(0);
@@ -316,26 +279,6 @@ void loop() {
     degree_alpha1 = Factors_Angle->getAzimuth();
     angle = degree_alpha1 - myYaw;
 
-    /*
-    Serial.print("LatMe_deg= ");
-    Serial.print(LatMe_deg , 7);
-    Serial.println();
-    Serial.print("LongMe_deg= ");
-    Serial.print(LongMe_deg , 7);
-    Serial.println();
-    Serial.print("distance= ");
-    Serial.print(distance , 10);
-    Serial.println();
-    Serial.print("degree_alpha1=");
-    Serial.print(degree_alpha1 , 7);
-    Serial.println();
-    Serial.print("myYaw=");
-    Serial.print(myYaw , 7);
-    Serial.println();
-    Serial.print("angle=");
-    Serial.println(angle , 7);
-    Serial.println();
-    */
 
     if (distance < 5 /*|| カメラでゴール検知*/) {
       //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
@@ -352,13 +295,8 @@ void loop() {
       //両輪回転で620度/s
       Rotate_Time = constrain(fabs(angle)*1000/620, fabs(angle)*1000/620, 1000);
 
-      /*右回転//drv用
-      Motors.rotateRight(0, duty_70);
-      Motors.rotateLeft(2, Max_Duty);
-      //tb6643kq
-      RotateMotor.rotateRight(0, duty_70);
-      RotateMotor.rotateLeft(1, Max_Duty);
-      *///dwgitalWrite
+      /*右回転*/
+      //dwgitalWrite
       if(angle >= 0){
         RotateMotor.rotateRight(2);
         RotateMotor.rotateLeft(1);
@@ -375,13 +313,8 @@ void loop() {
         myYaw = headingSensor.getYaw();
       }
 
-      /*8秒止まる//drv
-      Motors.rotateRight(0, duty_70);
-      Motors.rotateLeft(0, duty_70);
-      //tb6643kq
-      RotateMotor.rotateRight(0, duty_70);
-      RotateMotor.rotateLeft(0, duty_70);
-      *///degitalWrite
+      /*8秒止まる*/
+      //degitalWrite
       RotateMotor.rotateRight(0);
       RotateMotor.rotateLeft(0);
       strcpy(state, "brk");
@@ -393,13 +326,8 @@ void loop() {
       }
 
       } else{
-        /*1m進む//drv
-        Motors.rotateRight(2, duty_70);
-        Motors.rotateLeft(2, duty_70);
-        //tb6643kq
-        RotateMotor.rotateRight(1, duty_70);
-        RotateMotor.rotateLeft(1, duty_70);
-        *///degitalWrite
+        /*1m進む*/
+        //degitalWrite
         RotateMotor.rotateRight(1);
         RotateMotor.rotateLeft(1);
         strcpy(state, "fwd");
@@ -410,13 +338,8 @@ void loop() {
           myYaw = headingSensor.getYaw();
         }
 
-        /*8秒止まる//drv
-        Motors.rotateRight(0, duty_70);
-        Motors.rotateLeft(0, duty_70);
-        //tb6643kq
-        RotateMotor.rotateRight(0, duty_70);
-        RotateMotor.rotateLeft(0, duty_70);
-        *///degitalWrite
+        /*8秒止まる*/
+        //degitalWrite
         RotateMotor.rotateRight(0);
         RotateMotor.rotateLeft(0);
         strcpy(state, "brk");
@@ -437,13 +360,8 @@ void loop() {
         //両輪回転で620度/s
         Rotate_Time = constrain(fabs(angle)*1000/620, fabs(angle)*1000/620, 1000);
 
-        /*右回転//drv
-        Motors.rotateRight(0, duty_70);
-        Motors.rotateLeft(2, Max_Duty);
-        //tb6643kq
-        RotateMotor.rotateRight(0, duty_70);
-        RotateMotor.rotateLeft(1, Max_Duty);
-        *///degitalWrite
+        /*右回転*/
+        //degitalWrite
         if(angle >= 0){
           RotateMotor.rotateRight(2);
           RotateMotor.rotateLeft(1);
@@ -460,13 +378,8 @@ void loop() {
           myYaw = headingSensor.getYaw();
         }
 
-        /*8秒止まる//drv
-        Motors.rotateRight(0, duty_70);
-        Motors.rotateLeft(0, duty_70);
-        //tb6643kq
-        RotateMotor.rotateRight(0, duty_70);
-        RotateMotor.rotateLeft(0, duty_70);
-        *///degitalWrite
+        /*8秒止まる*/
+        //degitalWrite
         RotateMotor.rotateRight(0);
         RotateMotor.rotateLeft(0);
         strcpy(state, "brk");
@@ -477,13 +390,8 @@ void loop() {
           myYaw = headingSensor.getYaw();
         }
       }else {
-        /*5m進む//drv
-        Motors.rotateRight(2, duty_70);
-        Motors.rotateLeft(2, duty_70);
-        //tb6643kq
-        RotateMotor.rotateRight(1, duty_70);
-        RotateMotor.rotateLeft(1, duty_70);
-        *///degitalWrite
+        /*5m進む*/
+        //degitalWrite
         RotateMotor.rotateRight(1);
         RotateMotor.rotateLeft(1);
         strcpy(state, "fwd");
@@ -494,14 +402,8 @@ void loop() {
           myYaw = headingSensor.getYaw();
         }
 
-        //8秒止まる
-        /*//drv
-        Motors.rotateRight(0, duty_70);
-        Motors.rotateLeft(0, duty_70);
-        //tb6643kq
-        RotateMotor.rotateRight(0, duty_70);
-        RotateMotor.rotateLeft(0, duty_70);
-        *///degitalWrite
+        //8秒止まる*/
+        //degitalWrite
         RotateMotor.rotateRight(0);
         RotateMotor.rotateLeft(0);
         strcpy(state, "brk");
@@ -519,7 +421,7 @@ void loop() {
   case 4:
     /* phase is 4 */
     /* ゴール検知 */
-        ///degitalWrite
+    ///degitalWrite
     RotateMotor.rotateRight(0);
     RotateMotor.rotateLeft(0);
     strcpy(state, "brk");
@@ -572,7 +474,7 @@ void ParallelTask(void *param) {
          Serial.println("気圧爆弾爆発");
          phase = 2;
        }
-       break;                    //コメントアウト仮！！！！！！！！！！！！！！！！！！！
+       break;
 
       //case 2:
         /* phase is 2 */
@@ -799,39 +701,4 @@ void RecordCsv(){
       previous_SD_Millis = millis();
     }
   }
-}
-
-//赤色LED
-void LightRed(){
-  pixels.clear();
-  pixels.setBrightness(255);
-  pixels.setPixelColor(0, pixels.Color(255, 0, 0)); // 0番目の色を変える
-  pixels.show();
-}
-
-//虹色LED
-uint8_t LED_State = 0; uint8_t LED_RED = 255; uint8_t LED_GREEN = 0; uint8_t LED_BLUE = 0;
-void LightRainbow() {const int RED = 0; const int ORANGE = 1; const int YELLOW  = 2; const int GREEN = 3; const int CYAN = 4; const int BLUE = 5; const int PURPLE = 6; const int DIN_PIN = 17; const int LED_COUNT = 1; pixels.clear(); pixels.setBrightness(200); switch(LED_State){ case RED: if(LED_GREEN < 165){ LED_GREEN++; }else { LED_State = ORANGE; LED_RED = 255; LED_GREEN = 165; LED_BLUE = 0; } break; case ORANGE: if(LED_GREEN < 255){ LED_GREEN++; }else { LED_State = YELLOW; LED_RED = 255; LED_GREEN = 255; LED_BLUE = 0; } break; case YELLOW: if(LED_GREEN > 128){ LED_RED -= 2; LED_GREEN--; }else { LED_State = GREEN; LED_RED = 0; LED_GREEN = 128; LED_BLUE = 0; } break; case GREEN: if(LED_GREEN < 255){ LED_GREEN++; LED_BLUE += 2; }else { LED_State = CYAN; LED_RED = 0; LED_GREEN = 255; LED_BLUE = 255; } break; case CYAN: if(LED_GREEN > 0){ LED_GREEN--; }else { LED_State = BLUE; LED_RED = 0; LED_GREEN = 0; LED_BLUE = 255; } break; case BLUE: if(LED_RED < 128){ LED_RED++; LED_BLUE--; }else { LED_State = PURPLE; LED_RED = 128; LED_GREEN = 0; LED_BLUE = 128; } break; case PURPLE: if(LED_RED < 255){ LED_RED++; LED_BLUE--; }else { LED_State = RED; LED_RED = 255; LED_GREEN = 0; LED_BLUE = 0; } break; } pixels.setPixelColor(0, pixels.Color(LED_RED, LED_GREEN, LED_BLUE)); pixels.show(); delay(1);}
-
-//LEDアラート
-uint8_t Led_Alert_brightness = 0;
-uint8_t Led_Alert_fase = 0;//0: 小→大 1: 大→小
-void LightAlert(){
-  if(Led_Alert_fase == 0){
-    Led_Alert_brightness++;
-  } else if(Led_Alert_fase == 1){
-    Led_Alert_brightness--;
-  }
-  pixels.clear();
-  pixels.setBrightness(Led_Alert_brightness);
-  pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-  pixels.show();
-  if(Led_Alert_brightness == 255){
-    Led_Alert_fase = 1;
-    delay(30);
-  }else if(Led_Alert_fase == 0){
-    Led_Alert_fase = 0;
-    delay(30);
-  }
-  delay(1);
 }
