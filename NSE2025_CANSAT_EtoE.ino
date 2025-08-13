@@ -16,6 +16,7 @@
 #include "SD.h"
 #include "SPI.h"
 #include "SD_Record.h"
+#include <Adafruit_NeoPixel.h>
 
 Adafruit_BME280 bme;
 SFE_UBLOX_GNSS myGNSS;
@@ -43,9 +44,9 @@ float acc[3];
 
 /*標準気圧設定*/
 #define SEALEVELPRESSURE_HPA (1013.25)
-float BottomPress = 1013.25; //地上気圧
-double ThresholdPress = 999;//頂点検知の気圧　現地で入力
-
+float BottomPress = 995.7; //地上気圧
+double ThresholdPress = 993.5;//頂点検知の気圧　現地で入力
+//2.7pa/24m
 //モタドラ設定
 #define R_Ain1 0
 #define R_Ain2 1
@@ -100,12 +101,12 @@ float degree_alpha1 = 0.0;
 float myYaw = 0.0;
 
 //初期phase
-int8_t phase = 3; //!!!仮！
+int8_t phase = 1; //!!!仮！
 
 
 /*　ゴールの緯度経度　*/
-double LatG_deg = 33.5947198;  //後で変えて！！！
-double LongG_deg = 130.2181638; //後で変えて！！！
+double LatG_deg = 33.5947844;  //後で変えて！！！
+double LongG_deg = 130.2179640; //後で変えて！！！
 
 CalculateDistance* Factors_Distance;
 CalculateAngle* Factors_Angle;
@@ -113,32 +114,41 @@ CalculateAngle* Factors_Angle;
 /*落下検知設定*/
 int8_t IsShocked = 0;
 
+//デバッグ用のLEDのインスタンス化
+Adafruit_NeoPixel pixels(1, 17, NEO_GRB + NEO_KHZ800);
+
+
+int numnum = 99; //仮デバッグ用
 //-------------------------------------------------------------------------------------------
 void setup() {
+  delay(1000);
   Serial.begin(115200);
   Wire.begin(); // I2C通信を開始
 
   /*以下BNO055*/
-  if (BNO055.begin()) {
-    Serial.println("Sensor initialized successfully.");
-  } else {
-    Serial.println("Failed to initialize BNO055. Check connections.");
-    while (1); // 失敗した場合はここで停止
+  while(BNO055.begin() == false) {
+    Serial.println("BNO055初期化失敗");
+    LightAlert();
+    delay(3000);
   }
+  Serial.println("BNO055初期化成功");
 
-  if (headingSensor.begin()) {
-    Serial.println("Sensor initialized successfully.");
-  } else {
-    Serial.println("Failed to initialize BNO055. Check connections.");
-    while (1); // 失敗した場合はここで停止
+  while(headingSensor.begin() == false) {
+    Serial.println("河野Yawの初期化失敗");
+    LightAlert();
+    delay(3000);
   }
+  Serial.println("河野Yawの初期化成功");
 
   BNO055.setExtCrystalUse(true);
 
   /*以下bme280*/
-  if (!bme.begin(0x76, &Wire)) {
+  while(!bme.begin(0x76, &Wire)) {
     Serial.println("BME280が見つかりません。接続を確認してください。");
-    while (1);
+    previous_Millis = millis();
+    while(millis() - previous_Millis < 3000){
+      LightAlert();
+    }  
   }
   Serial.println("BME280 初期化成功");
 
@@ -146,6 +156,7 @@ void setup() {
   while (myGNSS.begin() == false) //Connect to the u-blox module using Wire port
   {
     Serial.println(F("u-blox GNSS not detected at default I2C address. Retrying..."));
+    LightAlert();
     delay(1000);
   }
 
@@ -154,6 +165,8 @@ void setup() {
   //GNSSを高精度モードに変更
   change_gnss_working_mode();
 
+  //LEDの初期化
+  pixels.begin();
   /*並列処理用タスク設定*/
   xTaskCreatePinnedToCore(
     ParallelTask,   // タスク関数へのポインタ(スレッドで実行させたい関数を設定)
@@ -169,7 +182,7 @@ void setup() {
   LongMe_deg = myGNSS.getLongitude() / pow(10, 7);
 
   Factors_Distance = new CalculateDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-  Factors_Angle = new CalculateAngle(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
+  Factors_Angle = new CalculateAngle(LatMe_deg, LongMe_deg, LatG_deg, LongG_deg);
 
 
 
@@ -213,11 +226,12 @@ void loop() {
   switch (phase)
     {
   case 0:
+    pixels.clear();
     /* phase is 0 */
     /*スイッチON→頂点検知*/
     //AveVarianceは後から数値を変更!要確認!
     //ThresholdPress,ListNumも後から数値を変更!要確認!
-    if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, 10) == 0) {//気圧が閾値より低い
+    if (AveVariance(10) < 1.4 && ComparePress(ThresholdPress, 10) == 0) {//分散が1.4以下且つ気圧が閾値より低い
       phase = 1;
     }
     break;
@@ -225,12 +239,13 @@ void loop() {
   case 1:
     /* phase is 1 */
     /*頂点検知→第一回衝撃→着地検知*/
-    if(IsShocked == 0) {
-      if (FallDetect(39.2 /*gx4*/, 50, 10, 10) == 1) {//多分FallDetectは検知されない。空中分解が怖いので。
-        IsShocked = 1;
-        shock_detect_Millis = millis();
-      }
-    }
+//    if(IsShocked == 0) {
+//      //FallDetect(加速度の閾値, 加速度取得間隔, 加速度平均が何回閾値を超えないかいけないかの閾値, 平均をとる個数)
+//      if (FallDetect(20 /*gx4*/, 50, 5, 10) == 1) {//多分FallDetectは検知されない。空中分解が怖いので。
+//        IsShocked = 1;        //仮!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//        shock_detect_Millis = millis();
+//      }
+//    }
     break;
 
   case 2:
@@ -253,6 +268,7 @@ void loop() {
     RotateMotor.rotateRight(1);
     RotateMotor.rotateLeft(1);
 
+    Serial.println(numnum);
     Serial.println("分離作動開始");
 
     previous_Millis = millis();
@@ -296,11 +312,11 @@ void loop() {
     myYaw = headingSensor.getYaw();
     Factors_Distance->updateLocation(LatMe_deg, LongMe_deg);
     distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-    Factors_Angle->Coordinates(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-    degree_alpha1 = Factors_Angle->GetFactor_Alpha1();
-    degree_alpha1 = degree_alpha1 * 180 / PI;
+    Factors_Angle->updateMyLocation(LatMe_deg, LongMe_deg);
+    degree_alpha1 = Factors_Angle->getAzimuth();
     angle = degree_alpha1 - myYaw;
 
+    /*
     Serial.print("LatMe_deg= ");
     Serial.print(LatMe_deg , 7);
     Serial.println();
@@ -319,6 +335,7 @@ void loop() {
     Serial.print("angle=");
     Serial.println(angle , 7);
     Serial.println();
+    */
 
     if (distance < 5 /*|| カメラでゴール検知*/) {
       //ここをちゃんと書かなきゃ0mゴールはないです！！！！！！！！！！
@@ -333,7 +350,7 @@ void loop() {
       //回る角度は最大でも350度.つまり2187msの回転が最大
 
       //両輪回転で620度/s
-      Rotate_Time = constrain(fabs(angle)*1000/620/9, fabs(angle)*1000/620/9, 1000);
+      Rotate_Time = constrain(fabs(angle)*1000/620, fabs(angle)*1000/620, 1000);
 
       /*右回転//drv用
       Motors.rotateRight(0, duty_70);
@@ -418,7 +435,7 @@ void loop() {
         //回る角度は最大でも300度.つまり1875msの回転が最大
 
         //両輪回転で620度/s
-        Rotate_Time = constrain(fabs(angle)*1000 / 620 / 9, fabs(angle)*1000/620/9, 1000);
+        Rotate_Time = constrain(fabs(angle)*1000/620, fabs(angle)*1000/620, 1000);
 
         /*右回転//drv
         Motors.rotateRight(0, duty_70);
@@ -514,6 +531,7 @@ void loop() {
 //-------------------------------------------------------------------------------------------
 void ParallelTask(void *param) {
   while(true) {
+    LightRainbow();
     RecordCsv();
     headingSensor.update();
     myYaw = headingSensor.getYaw();
@@ -530,25 +548,31 @@ void ParallelTask(void *param) {
         /*頂点検知→第一回衝撃→着地検知*/
         //時限爆弾1
         if((millis() - peak_detect_Millis) >= bombtime_1) {
+          numnum = 1;
+          Serial.println("爆弾1爆発");
           phase = 2;
         }
 
         //開傘衝撃検知後の時限爆弾
-        if(IsShocked == 1) {
-          if ((millis() - shock_detect_Millis) >= bombtime_2) {
-            phase = 2;
-          }
-        }else {
-          shock_detect_Millis = millis();
-        }
+//        if(IsShocked == 1) {
+//          LightRainbow();
+//          if ((millis() - shock_detect_Millis) >= bombtime_2) {
+//            numnum = 2;
+//            Serial.println("爆弾2爆発");
+//            phase = 2;
+//          }
+//        }else {
+//          shock_detect_Millis = millis();
+//        }
 
-        //BottomPress, ListNumは後から数値を変更!要確認!
-        if(CompareToBottomPress(BottomPress, 10) == 0) {
-        }else {
-          phase = 2;
-        }
-
-        break;
+       //BottomPress, ListNumは後から数値を変更!要確認!
+       if(CompareToBottomPress(BottomPress, 10) == 0) {
+       }else {
+          numnum = 3;
+         Serial.println("気圧爆弾爆発");
+         phase = 2;
+       }
+       break;                    //コメントアウト仮！！！！！！！！！！！！！！！！！！！
 
       //case 2:
         /* phase is 2 */
@@ -574,7 +598,7 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
   int8_t OverThresholdCount = 0; //加速度が閾値を超えた回数を記録する変数
   //FallListにListNum個の加速度を代入
   for (int i = 0; i < ListNum; i++) {
-    GetAccl(acc); //acc更新
+    GetAccl(acc); //acc更新;
     FallList[i] = sqrtf(powf(acc[0],2) + powf(acc[1],2) + powf(acc[2],2));
   }
   while (OverThresholdCount < OverThresholdNum) {
@@ -592,6 +616,11 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
     }
     //AvgAccをListNumで割って平均化
     AvgAcc = AvgAcc/ListNum;
+    Serial.print("加速度: ");
+    Serial.println(AvgAcc);
+    Serial.print("millis() - peak_detect_Millis: ");
+    Serial.println(millis() - peak_detect_Millis);
+
 
     if (AvgAcc < threshold) {  //平均が閾値より小さい
       if(OverThresholdCount >0 ) {  //且つOverThresholdCountが0以下じゃない
@@ -608,6 +637,7 @@ int8_t FallDetect(float threshold, int8_t addtime, int8_t OverThresholdNum, int8
       myYaw = headingSensor.getYaw();
     }
   }
+  delay(1000);
   return 1;
 }
 
@@ -669,6 +699,8 @@ int8_t CompareToBottomPress(float BottomPress, int8_t ListNum) {
 
 float GetPress() {
   float Press = bme.readPressure() / 100;
+  Serial.print("pressure: ");
+  Serial.println(Press);
   return Press;
 }
 
@@ -722,7 +754,7 @@ void RecordCsv(){
       previous_SD_Millis = millis();
 
       if (!SD.begin(cs)) {
-        Serial.println("！SDカードのマウントに失敗しました");
+        //Serial.println("！SDカードのマウントに失敗しました");
         return;
       }else {
         Serial.println("SDカードのマウントに成功しました");
@@ -733,7 +765,7 @@ void RecordCsv(){
         Serial.println("！SDカードがありません");
         return;
       }
-      writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state,degree_alpha1,myYaw \n");//ヘッダ
+      writeFile(SD, "/EtoE.csv", "mission_time,phase,longitude,latitude,pressure,camera,distance,angle,state,millis \n");//ヘッダ
       Record_Start_Flag = 1;
     }
 
@@ -752,17 +784,10 @@ void RecordCsv(){
 
       if(phase<3){
         snprintf(data, sizeof(data),
-        "%d,%d,%lf,%lf,%f,0,NA,NA,NA\n",
-        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure);
+        "%d,%d,%lf,%lf,%f,0,NA,NA,NA,%lu\n",
+        mission_time_SD, phase, LatMe_deg, LongMe_deg, pressure,millis());
 
       } else{
-
-/*    headingSensor.update();
-    myYaw = headingSensor.getYaw();
-    distance = Factors_Distance->GetDistance(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-    Factors_Angle->Coordinates(LatMe_deg, LatG_deg, LongMe_deg, LongG_deg);
-    degree_alpha1 = Factors_Angle->GetFactor_Alpha1() * 180 / PI;
-    angle = degree_alpha1 - myYaw;*/
 
         snprintf(data, sizeof(data),
         "%d,%d,%lf,%lf,%f,0,%lf,%lf,%s,\n",
@@ -774,4 +799,39 @@ void RecordCsv(){
       previous_SD_Millis = millis();
     }
   }
+}
+
+//赤色LED
+void LightRed(){
+  pixels.clear();
+  pixels.setBrightness(255);
+  pixels.setPixelColor(0, pixels.Color(255, 0, 0)); // 0番目の色を変える
+  pixels.show();
+}
+
+//虹色LED
+uint8_t LED_State = 0; uint8_t LED_RED = 255; uint8_t LED_GREEN = 0; uint8_t LED_BLUE = 0;
+void LightRainbow() {const int RED = 0; const int ORANGE = 1; const int YELLOW  = 2; const int GREEN = 3; const int CYAN = 4; const int BLUE = 5; const int PURPLE = 6; const int DIN_PIN = 17; const int LED_COUNT = 1; pixels.clear(); pixels.setBrightness(200); switch(LED_State){ case RED: if(LED_GREEN < 165){ LED_GREEN++; }else { LED_State = ORANGE; LED_RED = 255; LED_GREEN = 165; LED_BLUE = 0; } break; case ORANGE: if(LED_GREEN < 255){ LED_GREEN++; }else { LED_State = YELLOW; LED_RED = 255; LED_GREEN = 255; LED_BLUE = 0; } break; case YELLOW: if(LED_GREEN > 128){ LED_RED -= 2; LED_GREEN--; }else { LED_State = GREEN; LED_RED = 0; LED_GREEN = 128; LED_BLUE = 0; } break; case GREEN: if(LED_GREEN < 255){ LED_GREEN++; LED_BLUE += 2; }else { LED_State = CYAN; LED_RED = 0; LED_GREEN = 255; LED_BLUE = 255; } break; case CYAN: if(LED_GREEN > 0){ LED_GREEN--; }else { LED_State = BLUE; LED_RED = 0; LED_GREEN = 0; LED_BLUE = 255; } break; case BLUE: if(LED_RED < 128){ LED_RED++; LED_BLUE--; }else { LED_State = PURPLE; LED_RED = 128; LED_GREEN = 0; LED_BLUE = 128; } break; case PURPLE: if(LED_RED < 255){ LED_RED++; LED_BLUE--; }else { LED_State = RED; LED_RED = 255; LED_GREEN = 0; LED_BLUE = 0; } break; } pixels.setPixelColor(0, pixels.Color(LED_RED, LED_GREEN, LED_BLUE)); pixels.show(); delay(1);}
+
+//LEDアラート
+uint8_t Led_Alert_brightness = 0;
+uint8_t Led_Alert_fase = 0;//0: 小→大 1: 大→小
+void LightAlert(){
+  if(Led_Alert_fase == 0){
+    Led_Alert_brightness++;
+  } else if(Led_Alert_fase == 1){
+    Led_Alert_brightness--;
+  }
+  pixels.clear();
+  pixels.setBrightness(Led_Alert_brightness);
+  pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+  pixels.show();
+  if(Led_Alert_brightness == 255){
+    Led_Alert_fase = 1;
+    delay(30);
+  }else if(Led_Alert_fase == 0){
+    Led_Alert_fase = 0;
+    delay(30);
+  }
+  delay(1);
 }

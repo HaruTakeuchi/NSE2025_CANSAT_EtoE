@@ -1,91 +1,65 @@
-/* Created by 鳥井太智 in July 2025 */
-
-#include <cstdint>
+/*
+ * CalculateAngle.h (改善版)
+ * 2点間の距離と方位角を計算するクラス
+ * 作成者: 鳥井太智 (2025年7月)
+ * 改善者: *** (2025年8月)
+ */
 
 #ifndef CalculateAngle_h
 #define CalculateAngle_h
 #pragma once
-#include <cmath>
 
 #include <Arduino.h>
-
-constexpr double EQUATORIAL_RADIUS_A = 6378137.00; /* a */
-constexpr double POLAR_RADIUS_A = 6356752.00;
-constexpr double f_A = 0.003352859934;
-
+#include <cmath>
 
 class CalculateAngle {
-    public:
-        #ifdef ESP32
-        CalculateAngle(double LatMe_deg, double LatG_deg, double LongMe_deg, double LongG_deg);
-        #else
-        #endif
-        void Coordinates(double LatMe_deg, double LatG_deg, double LongMe_deg, double LongG_deg);
-        double ToRad(double degree);
-        double GetFactor_l();
-        double GetFactor_l_1();
-        double GetFactor_L();
-        double GetFactor_L_1();
-        double GetFactor_DELTA();
-        double GetFactor_SIGMA();
-        double GetFactor_u1();
-        double GetFactor_u2();
-        double GetFactor_SIGMA_1();
-        double GetFactor_DELTA_1();
-        double GetFactor_Xi();
-        double GetFactor_Xi_1();
-        double GetFactor_Eta();
-        double GetFactor_Eta_1();
-        double GetFactor_Alpha();
-        double GetFactor_AlphaHalf();
-        double GetFactor_Alpha_1();
-        double GetFactor_Alpha1_1();
-        double GetFactor_Alpha_2();
-        double GetFactor_Alpha21_1();
-        double GetFactor_Alpha1();
-        double GetFactor_x();
-        double GetFactor_y();
-        double GetFactor_c();
-        double GetFactor_g();
-        double GetFactor_h();
-        double GetFactor_sigma();
-        double GetFactor_J();
-        double GetFactor_K();
-        double GetFactor_gamma();
-        double GetFactor_GAMMA(); 
-        double GetFactor_zeta();
-        double GetFactor_zeta_1();
-        double GetFactor_R();
-        double GetFactor_q();
-        double GetFactor_f1();
-        double GetFactor_GammaZero();
-        double GetFactor_j();
-        double GetFactor_k();
-        double GetFactor_d1();
-        double GetFactor_d2();
-        double GetFactor_A0();
-        double GetFactor_B0();
-        double GetFactor_Psi();
-        double GetFactor_j1();
-        double GetFactor_Psi_1();
-        double GetFactor_Psi_2();
-        double GetFactor_D();
-        double GetFactor_E();
-        double GetFactor_F();
-        double GetFactor_G();
-        double SetThetaZero();
-        double CalculateTheta();
+public:
+    // コンストラクタ: 出発点と目標点を設定
+    #ifdef ESP32
+    CalculateAngle(double myLat_deg, double myLon_deg, double goalLat_deg, double goalLon_deg);
+    #endif
 
+    // --- Public API ---
+    // 現在地を更新する
+    void updateMyLocation(double myLat_deg, double myLon_deg);
+    
+    // 目標点までの方位角を取得する (0-360°)
+    double getAzimuth();
 
+    // 目標点までの距離(m)を取得する
+    double getDistance();
 
+private:
+    // --- 内部計算用メソッド (旧GetFactor群) ---
+    double toRad(double degree) const;
+    double getL1() const; // l'
+    double getCapitalL() const;
+    double getU1() const;
+    double getU2() const;
+    double getSigma1() const; // Σ'
+    double getDelta1() const; // Δ'
+    double getX() const;
+    double getY() const;
+    double getC() const;
+    double getSigma(double theta) const;
+    double getJ(double theta) const;
+    double getK(double theta) const;
+    double getGamma(double theta) const; // γ
+    double getCapitalGamma(double theta) const; // Γ
+    double getZeta(double theta) const; // ζ
+    double getA(double theta) const;
+    double getB(double theta) const;
+    double calculateTheta(); // 内部でθの収束計算を行う
 
-    private:
+    // --- メンバ変数 ---
+    double myLat_rad;     // 現在地の緯度 (ラジアン)
+    double myLon_rad;     // 現在地の経度 (ラジアン)
+    double goalLat_rad;   // 目標地の緯度 (ラジアン)
+    double goalLon_rad;   // 目標地の経度 (ラジアン)
 
-        double LatG_rad;
-        double LongG_rad;
-        double LatMe_rad;
-        double LongMe_rad;
-        double PreTheta;
+    // 地球に関する定数
+    static constexpr double EQUATORIAL_RADIUS = 6378137.0; // a: 赤道半径
+    static constexpr double FLATTENING = 1.0 / 298.257222101; // f: 扁平率
 };
 
-#endif
+#endif // CalculateAngle_h
